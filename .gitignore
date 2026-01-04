@@ -5,3 +5,4 @@ policy.txt
 ingest_weaviate.py
 init_weaviate.py
 test_data_output.json
+git_test.py
