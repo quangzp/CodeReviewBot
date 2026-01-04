@@ -1,14 +1,21 @@
 import weaviate
 from typing import List
-from neo4jdb.neo4j_db import Neo4jDB
+from src_bot.neo4jdb.neo4j_db import Neo4jDB
+from src_bot.config.config import configs
+from sentence_transformers import SentenceTransformer
 
 class CustomGraphRAGRetriever:
     def __init__(self):
         self.neo4j_db = Neo4jDB()
         self.driver = self.neo4j_db.driver
+        self.model = SentenceTransformer(
+            "microsoft/codebert-base",
+            device= "cpu"
+        )
         self.weaviate_client = weaviate.connect_to_local()
+        self.weaviate_collection = configs.WEAVIATE_COLLECTION_NAME
         self.cypher_query = """
-        MATCH (startNode) WHERE startNode.id = $weaviate_id
+        MATCH (startNode) WHERE startNode.ast_hash = $weaviate_id
         
         // Case 1: Nếu là Endpoint -> Tìm Method implement và Config liên quan
         OPTIONAL MATCH (startNode:EndpointNode)-[:IMPLEMENT]->(implMethod:MethodNode)
@@ -24,9 +31,9 @@ class CustomGraphRAGRetriever:
         OPTIONAL MATCH (startNode:ConfigurationNode)<-[:USE]-(userMethod:MethodNode)
         
         RETURN 
-            labels(startNode) as type,
+            labels(startNode) as node_type,
             startNode.name as name,
-            startNode.code as code,
+            startNode.content as code,
             // Gom nhóm thông tin
             collect(DISTINCT implMethod.name) as implements_logic,
             collect(DISTINCT usedConfig.key + '='+ usedConfig.value) as uses_config, // Lấy cả value config
@@ -45,27 +52,35 @@ class CustomGraphRAGRetriever:
         """
         Thực hiện tìm kiếm lai: Vector (Weaviate) -> Graph (Neo4j)
         """
-        response = (
-            self.weaviate_client.query
-            .get("CodeChunk", ["neo4j_id", "content", "functionName", "node_type"])
-            .with_hybrid(query=query_text)
-            .with_limit(top_k)
-            .do()
+        query_embedding = self.model.encode(query_text, normalize_embeddings=True)
+        collection = self.weaviate_client.collections.use(self.weaviate_collection)
+        response = collection.query.hybrid(
+            query=query_text,
+            vector=query_embedding.tolist(),
+            alpha=0.5,
+            limit=top_k,
+            return_properties=["ast_hash","name","content","file_path","node_type"]       # lấy field cần in
         )
+        results = []
+        for i, obj in enumerate(response.objects):
+            results.append({
+                "ast_hash": obj.properties.get("ast_hash"),
+                "name": obj.properties.get("name"),
+                "content": obj.properties.get("content"),
+                "file_path": obj.properties.get("file_path"),
+                "node_type": obj.properties.get("node_type"),
+            })
         
-        results = response.get("data", {}).get("Get", {}).get("CodeChunk", [])
         final_context = []
-
-       
         with self.driver.session() as session:
             for item in results:
-                neo4j_id = item.get("neo4j_id")
-               
-                graph_data = session.run(self.cypher_query, weaviate_id=neo4j_id).single()
-                
-                if graph_data:
-                    context_str = self._format_context(item, graph_data)
-                    final_context.append(context_str)
+                ast_hash = item.get("ast_hash")
+                graph_data = session.run(self.cypher_query, weaviate_id=ast_hash).single()
+                #print(item)
+                #print(graph_data)
+                # if graph_data:
+                #     context_str = self._format_context(item, graph_data)
+                #     final_context.append(context_str)
         
         return final_context
 

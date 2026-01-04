@@ -8,7 +8,7 @@ load_dotenv()
 class Configs(BaseSettings):
 
     PROJECT_ROOT: str = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "axonion")
+    PROJECT_NAME: str = os.getenv("PROJECT_NAME", "Code Bot Reviewer")
 
     # data dir
     DATA_DIR: str = os.getenv(
@@ -54,6 +54,8 @@ class Configs(BaseSettings):
     NEO4J_MAX_CONNECTION_LIFETIME: int = int(os.getenv("NEO4J_MAX_CONNECTION_LIFETIME", "30"))
     NEO4J_MAX_CONNECTION_POOL_SIZE: int = int(os.getenv("NEO4J_MAX_CONNECTION_POOL_SIZE", "50"))
     NEO4J_CONNECTION_TIMEOUT: float = float(os.getenv("NEO4J_CONNECTION_TIMEOUT", "30.0"))
+    GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
+    WEAVIATE_COLLECTION_NAME: str = os.getenv("WEAVIATE_COLLECTION_NAME", "")
 
     class Config:
         case_sensitive = True

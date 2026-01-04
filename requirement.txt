@@ -7,4 +7,6 @@ weaviate-client
 langchain
 langgraph
 langchain-ollama
-github
+PyGithub
+unidiff
+sentence_transformers

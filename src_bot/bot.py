@@ -1,7 +1,7 @@
 from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
 from langchain_core.prompts import ChatPromptTemplate
-from graph_retriever import CustomGraphRAGRetriever
+from src_bot.graph_retriever import CustomGraphRAGRetriever
 from langchain_ollama import ChatOllama
 
 class CodeReviewState(TypedDict):
@@ -18,7 +18,7 @@ class GraphRAGBot:
     def initialize(self):
         self.retriever = CustomGraphRAGRetriever()
         self.llm = ChatOllama(
-            model="qwen2.5-coder:7b",
+            model="deepseek-coder:1.3b-instruct",
             temperature=0,     
         )
 
@@ -44,22 +44,21 @@ class GraphRAGBot:
             self.retriever.close()
     
     def parse_diff_node(self, state: CodeReviewState):
-        print("--- STEP 1: PARSING DIFF ---")
+        # print("--- STEP 1: PARSING DIFF ---")
         diff = state["pr_diff"]
-        # co thể dùng thư viện `unidiff`
-        queries = []
-        lines = diff.split('\n')
-        for line in lines:
-            if line.startswith('def ') or line.startswith('class '):
-                queries.append(line.strip())
-            if "config" in line or "yaml" in line:
-                queries.append("configuration settings")
+        # queries = []
+        # lines = diff.split('\n')
+        # for line in lines:
+        #     if line.startswith('def ') or line.startswith('class '):
+        #         queries.append(line.strip())
+        #     if "config" in line or "yaml" in line:
+        #         queries.append("configuration settings")
 
-        # Nếu không parse được gì cụ thể, dùng cả đoạn diff làm query tìm kiếm
-        if not queries:
-            queries = [diff[:200]] 
+        # # Nếu không parse được gì cụ thể, dùng cả đoạn diff làm query tìm kiếm
+        # if not queries:
+        #     queries = [diff[:200]] 
             
-        return {"changed_files": queries}
+        return {"changed_files": [diff]}
 
     def retrieve_node(self,state: CodeReviewState):
         print("--- STEP 2: RETRIEVING GRAPH CONTEXT ---")
@@ -67,7 +66,7 @@ class GraphRAGBot:
         collected_context = []
         
         for query in queries:
-            results = self.retriever.search(query_text=query, top_k=5)
+            results = self.retriever.search(query_text=query, top_k=3)
             collected_context.extend(results)
             
         return {"context_data": collected_context}
@@ -91,18 +90,18 @@ class GraphRAGBot:
         
         Hãy trả về định dạng Markdown, chia rõ các mục: [Tóm tắt], [Phân tích tác động], [Cảnh báo bảo mật], [Đề xuất].
         """
-        
-        prompt = ChatPromptTemplate.from_template(system_prompt)
-        chain = prompt | self.llm
-        
-        context_str = "\n".join(state["context_data"]) if state["context_data"] else "Không tìm thấy ngữ cảnh trong Graph."
-        
-        response = chain.invoke({
-            "graph_context": context_str,
-            "pr_diff": state["pr_diff"]
-        })
-        
-        return {"final_review": response.content}
+        context_str = "\n".join(state["context_data"]) if len(state["context_data"]) > 0 else None
+        content = None
+        if context_str:
+            prompt = ChatPromptTemplate.from_template(system_prompt)
+            chain = prompt | self.llm
+            response = chain.invoke({
+                "graph_context": context_str,
+                "pr_diff": state["pr_diff"]
+            })
+            content = response.content
+
+        return {"final_review": content}
 
 bot_instance = GraphRAGBot()
 
