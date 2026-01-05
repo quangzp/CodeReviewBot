@@ -17,31 +17,21 @@ class CustomGraphRAGRetriever:
         self.cypher_query = """
         MATCH (startNode) WHERE startNode.ast_hash = $weaviate_id
         
-        // Case 1: Nếu là Endpoint -> Tìm Method implement và Config liên quan
-        OPTIONAL MATCH (startNode:EndpointNode)-[:IMPLEMENT]->(implMethod:MethodNode)
-        OPTIONAL MATCH (implMethod)-[:USE]->(usedConfig:Configuration)
-        
-        // Case 2: Nếu là Method -> Tìm Caller, Callee, Config và Endpoint cha
+        OPTIONAL MATCH (startNode:EndpointNode)-[:CALL]->(implMethod:MethodNode)
         OPTIONAL MATCH (caller:MethodNode)-[:CALL]->(startNode:MethodNode)
         OPTIONAL MATCH (startNode)-[:CALL]->(callee:MethodNode)
-        OPTIONAL MATCH (startNode)-[:USE]->(methodConfig:ConfigurationNode)
-        OPTIONAL MATCH (startNode)<-[:IMPLEMENT]-(parentEndpoint:EndpointNode)
-        
-        // Case 3: Nếu là Configuration -> Impact Analysis (Ai đang dùng nó?)
-        OPTIONAL MATCH (startNode:ConfigurationNode)<-[:USE]-(userMethod:MethodNode)
+        OPTIONAL MATCH (usedClass:ClassNode)<-[:USE]-(startNode:ClassNode)
+        OPTIONAL MATCH (startNode)-[:USE]->(usedClass:ClassNode)
+        OPTIONAL MATCH (startNode)<-[:CALL]-(parentEndpoint:EndpointNode)
         
         RETURN 
             labels(startNode) as node_type,
             startNode.name as name,
             startNode.content as code,
-            // Gom nhóm thông tin
-            collect(DISTINCT implMethod.name) as implements_logic,
-            collect(DISTINCT usedConfig.key + '='+ usedConfig.value) as uses_config, // Lấy cả value config
-            collect(DISTINCT methodConfig.key + '='+ methodConfig.value) as method_configs,
+            collect(DISTINCT usedClass.name) as uses_class, 
             collect(DISTINCT caller.name) as called_by,
             collect(DISTINCT callee.name) as calls_to,
-            collect(DISTINCT parentEndpoint.url) as triggers_endpoint,
-            collect(DISTINCT userMethod.name) as impacts_methods
+            collect(DISTINCT parentEndpoint.url) as triggers_endpoint
         """
     def close(self):
         """Đóng kết nối khi không dùng nữa"""
@@ -78,33 +68,30 @@ class CustomGraphRAGRetriever:
                 graph_data = session.run(self.cypher_query, weaviate_id=ast_hash).single()
                 #print(item)
                 #print(graph_data)
-                # if graph_data:
-                #     context_str = self._format_context(item, graph_data)
-                #     final_context.append(context_str)
+                if graph_data:
+                     context_str = self._format_context(item, graph_data)
+                     final_context.append(context_str)
         
         return final_context
 
     def _format_context(self, vector_data, graph_data) -> str:
-        """Helper để tạo văn bản mô tả ngữ cảnh dễ hiểu cho LLM"""
-        node_type = graph_data["type"][0] if graph_data["type"] else "Unknown"
+        node_type = graph_data["node_type"][0] if len(graph_data["node_type"]) else "Unknown"
         name = graph_data["name"]
         
         description = f"\n--- FOUND CONTEXT: {node_type} '{name}' ---\n"
         
-        if node_type == "Endpoint":
-            description += f"Logic xử lý (Implementation): {graph_data['implements_logic']}\n"
-            description += f"Cấu hình liên quan: {graph_data['uses_config']}\n"
+        if node_type == "EndpointNode":
+            description += f"Logic xử lý: {graph_data['triggers_endpoint']}\n"
+            description += f"Nội dung code đầy đủ:\n```\n{graph_data['code']}\n```\n"
             
-        elif node_type == "Method":
+        elif node_type == "MethodNode":
             description += f"Được gọi bởi (Callers): {graph_data['called_by']}\n"
             description += f"Gọi đến (Callees): {graph_data['calls_to']}\n"
             description += f"Thuộc API (Triggered by): {graph_data['triggers_endpoint']}\n"
-            description += f"Sử dụng Config: {graph_data['method_configs']}\n"
             description += f"Nội dung code đầy đủ:\n```\n{graph_data['code']}\n```\n"
             
-        elif node_type == "Configuration":
-            description += f"Giá trị cấu hình: {vector_data['content']}\n"
-            description += f"ẢNH HƯỞNG ĐẾN (Impact Analysis): Các hàm {graph_data['impacts_methods']} đang sử dụng config này.\n"
+        elif node_type == "ClassNode":
+            description += f"Nội dung code đầy đủ:\n```\n{graph_data['code']}\n```\n"
             
         return description
     
