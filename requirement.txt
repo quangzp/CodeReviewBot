@@ -1,0 +1,12 @@
+fastapi
+ollama
+python-dotenv~=1.1.1
+neo4j==5.14.0
+pydantic-settings~=2.11.0
+weaviate-client
+langchain
+langgraph
+langchain-ollama
+PyGithub
+unidiff
+sentence_transformers

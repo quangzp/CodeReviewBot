@@ -1,39 +1,40 @@
-from typing import Union
+import sys
+import os
 
-from fastapi import FastAPI
+# 1. Get the path to the current folder ('api')
+current_dir = os.path.dirname(os.path.abspath(__file__))
 
-app = FastAPI()
+# 2. Get the path to the parent folder ('project_root')
+parent_dir = os.path.dirname(current_dir)
 
+# 3. Add the parent folder to the system path
+sys.path.append(parent_dir)
 
-@app.get("/")
-def read_root():
-    return {"Hello": "World"}
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, BackgroundTasks
+from src_bot.bot import bot_instance
+from src_bot.service import bot_service_instance
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        bot_instance.initialize() 
+        bot_service_instance.initialize()
+    except Exception as e:
+        print(f"Lỗi khởi tạo Bot: {e}")
+    yield
+    bot_instance.close()
+    bot_service_instance.close()
 
-@app.get("/items/{item_id}")
-def read_item(item_id: int, q: Union[str, None] = None):
-    return {"item_id": item_id, "q": q}
+app = FastAPI(lifespan=lifespan)
 
-@app.post("/code-bot")
-async def receive_webhook(payload: dict):
-    # 1. Lấy đối tượng pull_request (chứa 90% thông tin bạn cần)
-    pr = payload.get("pull_request", {})
-    
-    # 2. Tạo một dictionary mới chỉ chứa thông tin quan trọng
-    # Dùng .get() để tránh lỗi nếu dữ liệu bị thiếu
-    clean_data = {
-        "action": payload.get("action"),               # opened, closed, merged...
-        "pr_number": pr.get("number"),                 # Số thứ tự PR (vd: #12)
-        "title": pr.get("title"),                      # Tiêu đề PR
-        "author": pr.get("user", {}).get("login"),     # Người tạo
-        "url": pr.get("html_url"),                     # Link để bấm vào xem
-        "body": pr.get("body"),                        # Nội dung mô tả (Description)
-        "from_branch": pr.get("head", {}).get("ref"),  # Nhánh nguồn (vd: dev)
-        "to_branch": pr.get("base", {}).get("ref"),    # Nhánh đích (vd: main)
-        "changed_files": pr.get("changed_files"),      # Số file bị thay đổi
-        "additions": pr.get("additions"),              # Số dòng code thêm vào
-        "deletions": pr.get("deletions")               # Số dòng code bị xóa
-    }
-
-    print("\n" + "="*30)
-    print(clean_data)
+@app.post("/webhook")
+async def receive_webhook(payload: dict, background_tasks: BackgroundTasks):
+    if payload.get('action') != 'opened':
+        return {"status": "ignored"}
+    background_tasks.add_task(
+        bot_service_instance.process_pr_review, 
+        repo_name=payload['repository']['full_name'], 
+        pr_number=payload['pull_request']['number']
+    )
+    return {"status": "ok"}
