@@ -12,8 +12,8 @@ sys.path.append(parent_dir)
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks
-from src_bot.bot import bot_instance
-from src_bot.service import bot_service_instance
+from src_bot..bot import bot_instance
+from src_bot..service import bot_service_instance
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

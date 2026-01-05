@@ -1,7 +1,7 @@
 import weaviate
 from typing import List
-from src_bot.neo4jdb.neo4j_db import Neo4jDB
-from src_bot.config.config import configs
+from src_bot..neo4jdb.neo4j_db import Neo4jDB
+from src_bot..config.config import configs
 from sentence_transformers import SentenceTransformer
 
 class CustomGraphRAGRetriever:
