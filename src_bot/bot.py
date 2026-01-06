@@ -1,7 +1,7 @@
 from typing import TypedDict, List
 from langgraph.graph import StateGraph, END
 from langchain_core.prompts import ChatPromptTemplate
-from src_bot..graph_retriever import CustomGraphRAGRetriever
+from src_bot.graph_retriever import CustomGraphRAGRetriever
 from langchain_ollama import ChatOllama
 
 class CodeReviewState(TypedDict):
@@ -38,6 +38,11 @@ class GraphRAGBot:
         if not self.app:
             raise Exception("Bot chưa được initialize!")
         return self.app.invoke(inputs)
+    
+    def review(self, pr_diff: str) -> str:
+        """Convenience method to review a PR diff and return the review text."""
+        result = self.invoke({"pr_diff": pr_diff})
+        return result.get("final_review", "")
 
     def close(self):
         if self.retriever:

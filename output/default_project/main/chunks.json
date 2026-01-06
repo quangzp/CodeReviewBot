@@ -1,0 +1,930 @@
+[
+  {
+    "package": "io.github.delirius325.jmeter.backendlistener.elasticsearch",
+    "class_name": "TestElasticSearchBackend",
+    "full_class_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackend",
+    "file_path": "/Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener/src/test/java/io/github/delirius325/jmeter/backendlistener/elasticsearch/TestElasticSearchBackend.java",
+    "content": "public class TestElasticSearchBackend {\n    private ElasticSearchMetric metricNoCI;\n\n    private ElasticSearchMetric metricCI;\n\n    @Before\n    public void setUp() throws Exception {\n        metricCI = new ElasticSearchMetric(new SampleResult(), \"info\", \"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\", 1, false, false,\n                new HashSet<String>());\n        metricNoCI = new ElasticSearchMetric(new SampleResult(), \"info\", \"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\", 0, false,\n                false, new HashSet<String>());\n    }\n\n    @Test\n    public void testGetElapsedTimeNoCI() throws Exception {\n        SimpleDateFormat sdf = new SimpleDateFormat(\"yyyy-MM-dd HH:mm:ss\");\n        Date testDate = this.metricNoCI.getElapsedTime(false);\n        assertNotNull(\"testDate = \" + sdf.format(testDate), sdf.format(testDate));\n    }\n\n    @Test\n    public void testGetElapsedTimeCI() throws Exception {\n        SimpleDateFormat sdf = new SimpleDateFormat(\"yyyy-MM-dd HH:mm:ss\");\n        Date testDate = this.metricCI.getElapsedTime(true);\n        assertNotNull(\"testDate = \" + sdf.format(testDate), sdf.format(testDate));\n    }\n\n    @Test\n    public void testMetrics() {\n        \n        ElasticSearchMetric metric1 = new ElasticSearchMetric(new SampleResult(), \"info\", \"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\", 1, false, false, new HashSet<>());\n        assertEquals(\"Expected time mismatch\", metric1.getElapsedTime(true), metric1.getElapsedTime(false));  \n        \n        \n        \n        \n        \n        \n        \n    }\n}",
+    "ast_hash": "0ef3b2e8800cb02b6a293589aaba9d43f45bdc182d91d0d6a6dd664b2065897b",
+    "implements": [],
+    "methods": [
+      {
+        "name": "setUp()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackend.setUp()",
+        "body": "@Before\n    public void setUp() throws Exception {\n        metricCI = new ElasticSearchMetric(new SampleResult(), \"info\", \"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\", 1, false, false,\n                new HashSet<String>());\n        metricNoCI = new ElasticSearchMetric(new SampleResult(), \"info\", \"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\", 0, false,\n                false, new HashSet<String>());\n    }",
+        "ast_hash": "533076b0862c1a7730d6a3acaf05836ff481e7c3fc6f56d91de971b73a1c39f4",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "testGetElapsedTimeNoCI()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackend.testGetElapsedTimeNoCI()",
+        "body": "@Test\n    public void testGetElapsedTimeNoCI() throws Exception {\n        SimpleDateFormat sdf = new SimpleDateFormat(\"yyyy-MM-dd HH:mm:ss\");\n        Date testDate = this.metricNoCI.getElapsedTime(false);\n        assertNotNull(\"testDate = \" + sdf.format(testDate), sdf.format(testDate));\n    }",
+        "ast_hash": "8c4e38b84c8a833d221c561d6e079e11f147ce24aa7cffae0b8f15bbad67559f",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.getElapsedTime(boolean forCi)",
+            "params": []
+          }
+        ],
+        "used_types": [],
+        "field_access": [
+          "ElasticSearchMetric metricNoCI"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "testGetElapsedTimeCI()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackend.testGetElapsedTimeCI()",
+        "body": "@Test\n    public void testGetElapsedTimeCI() throws Exception {\n        SimpleDateFormat sdf = new SimpleDateFormat(\"yyyy-MM-dd HH:mm:ss\");\n        Date testDate = this.metricCI.getElapsedTime(true);\n        assertNotNull(\"testDate = \" + sdf.format(testDate), sdf.format(testDate));\n    }",
+        "ast_hash": "17534785db8b3410b54178f9c75ae7ebeda6a0f4371f41cd8dfd62a60c5b5926",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.getElapsedTime(boolean forCi)",
+            "params": []
+          }
+        ],
+        "used_types": [],
+        "field_access": [
+          "ElasticSearchMetric metricCI"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "testMetrics()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackend.testMetrics()",
+        "body": "@Test\n    public void testMetrics() {\n        \n        ElasticSearchMetric metric1 = new ElasticSearchMetric(new SampleResult(), \"info\", \"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\", 1, false, false, new HashSet<>());\n        assertEquals(\"Expected time mismatch\", metric1.getElapsedTime(true), metric1.getElapsedTime(false));  \n        \n        \n        \n        \n        \n        \n        \n    }",
+        "ast_hash": "d3c4016d98ef5fcf97467134fbd74986c4abbc77463f39d6e0b54e22bfe6464a",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.getElapsedTime(boolean forCi)",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric"
+        ],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      }
+    ],
+    "parent_class": [
+      null
+    ],
+    "project_id": "default_project",
+    "branch": "main",
+    "used_types": [
+      "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric"
+    ],
+    "is_nested": false,
+    "type": "regular",
+    "is_annotation": false,
+    "handles_annotation": null,
+    "annotations": []
+  },
+  {
+    "package": "io.github.delirius325.jmeter.backendlistener.elasticsearch",
+    "class_name": "TestElasticSearchBackendHTTPsConnection",
+    "full_class_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackendHTTPsConnection",
+    "file_path": "/Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener/src/test/java/io/github/delirius325/jmeter/backendlistener/elasticsearch/TestElasticSearchBackendHTTPsConnection.java",
+    "content": "@Ignore(\"Running SSL protected elasticsearch needed\")\npublic class TestElasticSearchBackendHTTPsConnection {\n    private static RestClient client;\n\n    private ElasticSearchMetricSender sender;\n\n    @Before\n    public void setUp() throws Exception {\n        Configurator.initialize(null, \"config/log4j2.xml\");\n        SimpleDateFormat sdf = new SimpleDateFormat(\"yyyyMMddHHmmss\");\n\n        \n        String SSL_TRUSTSTORE_PW = \"changeit\";  \n\n        \n        int port = Integer.parseInt(\"9200\");  \n\n        \n        System.setProperty(\"javax.net.ssl.keyStore\", SSL_KEYSTORE_PATH);  \n\n        \n        client = RestClient.builder(new HttpHost(\"localhost\", port, \"https\"))\n                .loadKeystores()  \n                .build();\n        sender = new ElasticSearchMetricSender(client, \"test_\" + sdf.format(new Date()), \"logstashTest\",\n                \"logstashTest\", \"\");\n    }\n\n    @Test\n    public void createIndex() {\n        sender.createIndex();\n    }\n}",
+    "ast_hash": "09d6f886f963d4e58a1924344eeba1dbb87eac3aed1020b34dff81be215aebce",
+    "implements": [],
+    "methods": [
+      {
+        "name": "setUp()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackendHTTPsConnection.setUp()",
+        "body": "@Before\n    public void setUp() throws Exception {\n        Configurator.initialize(null, \"config/log4j2.xml\");\n        SimpleDateFormat sdf = new SimpleDateFormat(\"yyyyMMddHHmmss\");\n\n        \n        String SSL_TRUSTSTORE_PW = \"changeit\";  \n\n        \n        int port = Integer.parseInt(\"9200\");  \n\n        \n        System.setProperty(\"javax.net.ssl.keyStore\", SSL_KEYSTORE_PATH);  \n\n        \n        client = RestClient.builder(new HttpHost(\"localhost\", port, \"https\"))\n                .loadKeystores()  \n                .build();\n        sender = new ElasticSearchMetricSender(client, \"test_\" + sdf.format(new Date()), \"logstashTest\",\n                \"logstashTest\", \"\");\n    }",
+        "ast_hash": "0c968e59005f5f6d8cdac835eeea48bc3b4effa9282395ca625508d90effbf0b",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "createIndex()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.TestElasticSearchBackendHTTPsConnection.createIndex()",
+        "body": "@Test\n    public void createIndex() {\n        sender.createIndex();\n    }",
+        "ast_hash": "4c2b414a539dddfc366b9f5d76e96a741b2e150baeae688bb16eba34be68e6a0",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.() {",
+            "params": []
+          }
+        ],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      }
+    ],
+    "parent_class": [
+      null
+    ],
+    "project_id": "default_project",
+    "branch": "main",
+    "used_types": [
+      "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender",
+      "org.elasticsearch.client.RestClient"
+    ],
+    "is_nested": false,
+    "type": "regular",
+    "is_annotation": false,
+    "handles_annotation": null,
+    "annotations": []
+  },
+  {
+    "package": "io.github.delirius325.jmeter.backendlistener.elasticsearch",
+    "class_name": "ElasticSearchRequests",
+    "full_class_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchRequests",
+    "file_path": "/Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener/src/main/java/io/github/delirius325/jmeter/backendlistener/elasticsearch/ElasticSearchRequests.java",
+    "content": "public class ElasticSearchRequests {\n    \n                                                                              \n\n    public static String SEND_BULK_REQUEST = \"{ \\\"create\\\" : { \\\"_index\\\" : \\\"%s\\\" } }\";  \n    \n    \n    public static String buildQuery(String userInput) {\n        return \"SELECT * FROM logs WHERE label = '\" + userInput + \"'\";  \n    }\n    \n    \n    public static boolean validatePattern(String input) {\n        return input.matches(\"(a+)+b\");  \n    }\n}",
+    "ast_hash": "af5edbc670ce3707ad3fe85a25701182aa7dff7d4cf383555d7aa8f4d1c4b61c",
+    "implements": [],
+    "methods": [
+      {
+        "name": "buildQuery(String userInput)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchRequests.buildQuery(String userInput)",
+        "body": "public static String buildQuery(String userInput) {\n        return \"SELECT * FROM logs WHERE label = '\" + userInput + \"'\";  \n    }",
+        "ast_hash": "522a9a7c98202a4f33ffa6048cb079fe92b225efb32b5ad43d026898f0e2c93f",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "validatePattern(String input)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchRequests.validatePattern(String input)",
+        "body": "public static boolean validatePattern(String input) {\n        return input.matches(\"(a+)+b\");  \n    }",
+        "ast_hash": "9aaec2770a3e224f7247c116ffa8d9f0a44f64c98a38b3e785d468fe8cd89c0e",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      }
+    ],
+    "parent_class": [
+      null
+    ],
+    "project_id": "default_project",
+    "branch": "main",
+    "used_types": [],
+    "is_nested": false,
+    "type": "regular",
+    "is_annotation": false,
+    "handles_annotation": null,
+    "annotations": []
+  },
+  {
+    "package": "io.github.delirius325.jmeter.backendlistener.elasticsearch",
+    "class_name": "ElasticsearchBackendClient",
+    "full_class_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient",
+    "file_path": "/Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener/src/main/java/io/github/delirius325/jmeter/backendlistener/elasticsearch/ElasticsearchBackendClient.java",
+    "content": "public class ElasticsearchBackendClient extends AbstractBackendListenerClient {\n\n    private static final String BUILD_NUMBER = \"BuildNumber\";\n    private static final String ES_SCHEME = \"es.scheme\";\n    private static final String ES_HOST = \"es.host\";\n    private static final String ES_PORT = \"es.port\";\n    private static final String ES_INDEX = \"es.index\";\n    private static final String ES_FIELDS = \"es.fields\";\n    private static final String ES_TIMESTAMP = \"es.timestamp\";\n    private static final String ES_BULK_SIZE = \"es.bulk.size\";\n    private static final String ES_TIMEOUT_MS = \"es.timout.ms\";\n    private static final String ES_SAMPLE_FILTER = \"es.sample.filter\";\n    private static final String ES_TEST_MODE = \"es.test.mode\";\n    private static final String ES_AUTH_USER = \"es.xpack.user\";\n    private static final String ES_AUTH_PWD = \"es.xpack.password\";\n    private static final String ES_PARSE_REQ_HEADERS = \"es.parse.all.req.headers\";\n    private static final String ES_PARSE_RES_HEADERS = \"es.parse.all.res.headers\";\n    private static final String ES_AWS_ENDPOINT = \"es.aws.endpoint\";\n    private static final String ES_AWS_REGION = \"es.aws.region\";\n    private static final String ES_SSL_TRUSTSTORE_PATH = \"es.ssl.truststore.path\";\n    private static final String ES_SSL_TRUSTSTORE_PW = \"es.ssl.truststore.pw\";\n    private static final String ES_SSL_KEYSTORE_PATH = \"es.ssl.keystore.path\";\n    private static final String ES_SSL_KEYSTORE_PW = \"es.ssl.keystore.pw\";\n    private static final String ES_SSL_VERIFICATION_MODE = \"es.ssl.verificationMode\";\n    private static final long DEFAULT_TIMEOUT_MS = 200L;\n    private static final String SERVICE_NAME = \"es\";\n    private static RestClient client;\n    private static final Logger logger = LoggerFactory.getLogger(ElasticsearchBackendClient.class);\n    private static final AWSCredentialsProvider credentialsProvider = new DefaultAWSCredentialsProviderChain();\n    private static final Map<String, String> DEFAULT_ARGS = new LinkedHashMap<>();\n    static {\n        DEFAULT_ARGS.put(ES_SCHEME, \"http\");\n        DEFAULT_ARGS.put(ES_HOST, null);\n        DEFAULT_ARGS.put(ES_PORT, \"9200\");\n        DEFAULT_ARGS.put(ES_INDEX, null);\n        DEFAULT_ARGS.put(ES_TIMESTAMP, \"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\");\n        DEFAULT_ARGS.put(ES_BULK_SIZE, \"100\");\n        DEFAULT_ARGS.put(ES_TIMEOUT_MS, Long.toString(DEFAULT_TIMEOUT_MS));\n        DEFAULT_ARGS.put(ES_SAMPLE_FILTER, null);\n        DEFAULT_ARGS.put(ES_FIELDS, null);\n        DEFAULT_ARGS.put(ES_TEST_MODE, \"info\");\n        DEFAULT_ARGS.put(ES_AUTH_USER, \"\");\n        DEFAULT_ARGS.put(ES_AUTH_PWD, \"\");\n        DEFAULT_ARGS.put(ES_PARSE_REQ_HEADERS, \"false\");\n        DEFAULT_ARGS.put(ES_PARSE_RES_HEADERS, \"false\");\n        DEFAULT_ARGS.put(ES_AWS_ENDPOINT,  \"\");\n        DEFAULT_ARGS.put(ES_AWS_REGION, \"\");\n        DEFAULT_ARGS.put(ES_SSL_TRUSTSTORE_PATH, \"\");\n        DEFAULT_ARGS.put(ES_SSL_TRUSTSTORE_PW, \"\");\n        DEFAULT_ARGS.put(ES_SSL_KEYSTORE_PATH, \"\");\n        DEFAULT_ARGS.put(ES_SSL_KEYSTORE_PW, \"\");\n        DEFAULT_ARGS.put(ES_SSL_VERIFICATION_MODE, \"full\");\n    }\n    private ElasticSearchMetricSender sender;\n    private Set<String> modes;\n    private Set<String> filters;\n    private Set<String> fields;\n    private int buildNumber;\n    private int bulkSize;\n    private int esVersion;\n    private long timeoutMs;\n\n    private static final TrustStrategy TRUST_ALL_STRATEGY = (chain, authType) -> true;\n\n    @Override\n    public Arguments getDefaultParameters() {\n        Arguments arguments = new Arguments();\n        DEFAULT_ARGS.forEach(arguments::addArgument);\n        return arguments;\n    }\n\n    @Override\n    public void setupTest(BackendListenerContext context) throws Exception {\n        \n        validateConfiguration(context);  \n        \n        \n        this.bulkSize = Integer.parseInt(context.getParameter(ES_BULK_SIZE).trim());  \n        \n        \n        client = RestClient.builder(new HttpHost(context.getParameter(ES_HOST),\n                Integer.parseInt(context.getParameter(ES_PORT)), context.getParameter(ES_SCHEME)))\n                .build();\n        \n        \n        \n        try {\n            this.filters = new HashSet<>();\n            this.fields = new HashSet<>();\n            this.modes = new HashSet<>(Arrays.asList(\"info\", \"debug\", \"error\", \"quiet\"));\n            this.bulkSize = Integer.parseInt(context.getParameter(ES_BULK_SIZE));\n            this.timeoutMs = Integer.parseInt((context.getParameter(ES_TIMEOUT_MS)));\n            this.buildNumber = (JMeterUtils.getProperty(ElasticsearchBackendClient.BUILD_NUMBER) != null\n                    && !JMeterUtils.getProperty(ElasticsearchBackendClient.BUILD_NUMBER).trim().equals(\"\"))\n                            ? Integer.parseInt(JMeterUtils.getProperty(ElasticsearchBackendClient.BUILD_NUMBER)) : 0;\n\n            setSSLConfiguration(context);\n\n            if (context.getParameter(ES_AWS_ENDPOINT).equalsIgnoreCase(\"\")) {\n                client = RestClient\n                        .builder(new HttpHost(context.getParameter(ES_HOST),\n                                Integer.parseInt(context.getParameter(ES_PORT)), context.getParameter(ES_SCHEME)))\n                        .setHttpClientConfigCallback(httpAsyncClientBuilder -> {\n                            if (context.getParameter(ES_SSL_VERIFICATION_MODE).equalsIgnoreCase(\"none\")) {\n                                logger.info(\"Will trust all remote SSL certificates.\");\n                                final SSLContextBuilder contextBuilder = new SSLContextBuilder();\n                                try {\n                                    contextBuilder.loadTrustMaterial(TRUST_ALL_STRATEGY);\n                                    httpAsyncClientBuilder.setSSLContext(contextBuilder.build());\n                                    httpAsyncClientBuilder.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE);\n                                }\n                                catch (Exception e) {\n                                    \n                                    \n                                }\n                            }\n                            return httpAsyncClientBuilder;\n                        })\n                        .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder.setConnectTimeout(5000)\n                                .setSocketTimeout((int) timeoutMs))\n                        .setFailureListener(new RestClient.FailureListener() {\n                            @Override\n                            public void onFailure(Node node) {\n                                logger.error(\"Error with node: \" + node.toString());\n                            }\n                        }).build();\n            } else {\n                AWS4Signer signer = new AWS4Signer();\n                signer.setServiceName(SERVICE_NAME);\n                signer.setRegionName(context.getParameter(ES_AWS_REGION));\n                HttpRequestInterceptor interceptor = new AWSRequestSigningApacheInterceptor(SERVICE_NAME, signer,\n                        credentialsProvider);\n                client = RestClient.builder(HttpHost.create(context.getParameter(ES_AWS_ENDPOINT)))\n                        .setHttpClientConfigCallback(hacb -> hacb.addInterceptorLast(interceptor)).build();\n            }\n\n            convertParameterToSet(context, ES_SAMPLE_FILTER, this.filters);\n            convertParameterToSet(context, ES_FIELDS, this.fields);\n\n            this.sender = new ElasticSearchMetricSender(client, context.getParameter(ES_INDEX).toLowerCase(),\n                    context.getParameter(ES_AUTH_USER), context.getParameter(ES_AUTH_PWD),\n                    context.getParameter(ES_AWS_ENDPOINT));\n            this.sender.createIndex();\n            this.esVersion = sender.getElasticSearchVersion();\n\n            checkTestMode(context.getParameter(ES_TEST_MODE));\n            super.setupTest(context);\n        } catch (Exception e) {\n            throw new IllegalStateException(\"Unable to connect to the ElasticSearch engine\", e);\n        }\n    }\n\n    \n                                                                                                 \n                     \n                       \n                 \n\n    private void convertParameterToSet(BackendListenerContext context, String parameter, Set<String> set) {\n        String[] array = (context.getParameter(parameter).contains(\";\")) ? context.getParameter(parameter).split(\";\")\n                : new String[] { context.getParameter(parameter) };\n        if (array.length > 0 && !array[0].trim().equals(\"\")) {\n            for (String entry : array) {\n                set.add(entry.toLowerCase().trim());\n                if(logger.isDebugEnabled())\n                    logger.debug(\"Parsed from \" + parameter + \": \" + entry.toLowerCase().trim());\n            }\n        }\n    }\n\n    \n                                                                                               \n                     \n\n    private void setSSLConfiguration(BackendListenerContext context) {\n        String keyStorePath = context.getParameter(ES_SSL_KEYSTORE_PATH);\n        if (!keyStorePath.equalsIgnoreCase(\"\")) {\n            logger.warn(\"KeyStore system properties overwritten by ES SSL configuration.\");\n            System.setProperty(\"javax.net.ssl.keyStore\", keyStorePath);\n            System.setProperty(\"javax.net.ssl.keyStorePassword\", context.getParameter(ES_SSL_KEYSTORE_PW));\n            switch (FilenameUtils.getExtension(keyStorePath)) {\n                case \"jks\":\n                    System.setProperty(\"javax.net.ssl.keyStoreType\", \"jks\");\n                    break;\n                case \"p12\":\n                    System.setProperty(\"javax.net.ssl.keyStoreType\", \"pkcs12\");\n                    break;\n                default:\n                    System.setProperty(\"javax.net.ssl.keyStoreType\", \"\");\n                    break;\n            }\n        }\n\n        String trustStorePath = context.getParameter(ES_SSL_TRUSTSTORE_PATH);\n        if (!trustStorePath.equalsIgnoreCase(\"\")) {\n            logger.warn(\"TrustStore system properties overwritten by ES SSL configuration.\");\n            System.setProperty(\"javax.net.ssl.trustStore\", trustStorePath);\n            System.setProperty(\"javax.net.ssl.trustStorePassword\", context.getParameter(ES_SSL_TRUSTSTORE_PW));\n            switch (FilenameUtils.getExtension(trustStorePath)) {\n                case \"jks\":\n                    System.setProperty(\"javax.net.ssl.trustStoreType\", \"jks\");\n                    break;\n                case \"p12\":\n                    System.setProperty(\"javax.net.ssl.trustStoreType\", \"pkcs12\");\n                    break;\n                default:\n                    System.setProperty(\"javax.net.ssl.trustStoreType\", \"\");\n                    break;\n            }\n        }\n\n    }\n\n    @Override\n    public void handleSampleResults(List<SampleResult> results, BackendListenerContext context) {\n        for (SampleResult sr : results) {\n            ElasticSearchMetric metric = new ElasticSearchMetric(sr, context.getParameter(ES_TEST_MODE),\n                    context.getParameter(ES_TIMESTAMP), this.buildNumber,\n                    context.getBooleanParameter(ES_PARSE_REQ_HEADERS, false),\n                    context.getBooleanParameter(ES_PARSE_RES_HEADERS, false), fields);\n\n            if (validateSample(context, sr)) {\n                try {\n                    this.sender.addToList(new Gson().toJson(metric.getMetric(context)));\n                } catch (Exception e) {\n                    logger.error(\n                            \"The ElasticSearch Backend Listener was unable to add sampler to the list of samplers to send... More info in JMeter's console.\");\n                    e.printStackTrace();\n                }\n            }\n        }\n\n        if (this.sender.getListSize() >= this.bulkSize) {\n            try {\n                this.sender.sendRequest(this.esVersion);\n            } catch (Exception e) {\n                logger.error(\"Error occured while sending bulk request.\", e);\n            } finally {\n                this.sender.clearList();\n            }\n        }\n    }\n\n    @Override\n    public void teardownTest(BackendListenerContext context) throws Exception {\n        if (this.sender.getListSize() > 0) {\n            this.sender.sendRequest(this.esVersion);\n        }\n        this.sender.closeConnection();\n        super.teardownTest(context);\n    }\n\n    \n                                                   \n       \n                  \n                                         \n\n    private void checkTestMode(String mode) {\n        if (!this.modes.contains(mode)) {\n            logger.warn(\n                    \"The parameter \\\"es.test.mode\\\" isn't set properly. Three modes are allowed: debug ,info, and quiet.\");\n            logger.warn(\n                    \" -- \\\"debug\\\": sends request and response details to ElasticSearch. Info only sends the details if the response has an error.\");\n            logger.warn(\" -- \\\"info\\\": should be used in production\");\n            logger.warn(\" -- \\\"error\\\": should be used if you.\");\n            logger.warn(\" -- \\\"quiet\\\": should be used if you don't care to have the details.\");\n        }\n    }\n\n    \n                                                                                               \n       \n                     \n                                                \n                \n                                          \n                                                                            \n\n    private boolean validateSample(BackendListenerContext context, SampleResult sr) {\n        boolean valid = true;\n        String sampleLabel = sr.getSampleLabel().toLowerCase().trim();\n\n        if (this.filters.size() > 0) {\n            for (String filter : filters) {\n                Pattern pattern = Pattern.compile(filter);\n                Matcher matcher = pattern.matcher(sampleLabel);\n\n                if (!sampleLabel.startsWith(\"!!\") && (sampleLabel.contains(filter) || matcher.find())) {\n                    valid = true;\n                    break;\n                } else {\n                    valid = false;\n                }\n            }\n        }\n\n        \n        if (sr.isSuccessful() && context.getParameter(ES_TEST_MODE).trim().equalsIgnoreCase(\"error\") && valid) {\n            valid = false;\n        }\n\n        return valid;\n    }\n}",
+    "ast_hash": "569a745712a93f75fabf741d628fd23101713c1a57e313a4b3ea6efbf580d874",
+    "implements": [],
+    "methods": [
+      {
+        "name": "getDefaultParameters()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.getDefaultParameters()",
+        "body": "@Override\n    public Arguments getDefaultParameters() {\n        Arguments arguments = new Arguments();\n        DEFAULT_ARGS.forEach(arguments::addArgument);\n        return arguments;\n    }",
+        "ast_hash": "e053af0568eb064b62c3bf5cd80faac97460e487d4778f17ed979bce4113f138",
+        "method_calls": [],
+        "used_types": [
+          "org.apache.jmeter.config.Arguments"
+        ],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": [
+          "Override"
+        ]
+      },
+      {
+        "name": "setupTest(BackendListenerContext context)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.setupTest(BackendListenerContext context)",
+        "body": "@Override\n    public void setupTest(BackendListenerContext context) throws Exception {\n        \n        validateConfiguration(context);  \n        \n        \n        this.bulkSize = Integer.parseInt(context.getParameter(ES_BULK_SIZE).trim());  \n        \n        \n        client = RestClient.builder(new HttpHost(context.getParameter(ES_HOST),\n                Integer.parseInt(context.getParameter(ES_PORT)), context.getParameter(ES_SCHEME)))\n                .build();\n        \n        \n        \n        try {\n            this.filters = new HashSet<>();\n            this.fields = new HashSet<>();\n            this.modes = new HashSet<>(Arrays.asList(\"info\", \"debug\", \"error\", \"quiet\"));\n            this.bulkSize = Integer.parseInt(context.getParameter(ES_BULK_SIZE));\n            this.timeoutMs = Integer.parseInt((context.getParameter(ES_TIMEOUT_MS)));\n            this.buildNumber = (JMeterUtils.getProperty(ElasticsearchBackendClient.BUILD_NUMBER) != null\n                    && !JMeterUtils.getProperty(ElasticsearchBackendClient.BUILD_NUMBER).trim().equals(\"\"))\n                            ? Integer.parseInt(JMeterUtils.getProperty(ElasticsearchBackendClient.BUILD_NUMBER)) : 0;\n\n            setSSLConfiguration(context);\n\n            if (context.getParameter(ES_AWS_ENDPOINT).equalsIgnoreCase(\"\")) {\n                client = RestClient\n                        .builder(new HttpHost(context.getParameter(ES_HOST),\n                                Integer.parseInt(context.getParameter(ES_PORT)), context.getParameter(ES_SCHEME)))\n                        .setHttpClientConfigCallback(httpAsyncClientBuilder -> {\n                            if (context.getParameter(ES_SSL_VERIFICATION_MODE).equalsIgnoreCase(\"none\")) {\n                                logger.info(\"Will trust all remote SSL certificates.\");\n                                final SSLContextBuilder contextBuilder = new SSLContextBuilder();\n                                try {\n                                    contextBuilder.loadTrustMaterial(TRUST_ALL_STRATEGY);\n                                    httpAsyncClientBuilder.setSSLContext(contextBuilder.build());\n                                    httpAsyncClientBuilder.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE);\n                                }\n                                catch (Exception e) {\n                                    \n                                    \n                                }\n                            }\n                            return httpAsyncClientBuilder;\n                        })\n                        .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder.setConnectTimeout(5000)\n                                .setSocketTimeout((int) timeoutMs))\n                        .setFailureListener(new RestClient.FailureListener() {\n                            @Override\n                            public void onFailure(Node node) {\n                                logger.error(\"Error with node: \" + node.toString());\n                            }\n                        }).build();\n            } else {\n                AWS4Signer signer = new AWS4Signer();\n                signer.setServiceName(SERVICE_NAME);\n                signer.setRegionName(context.getParameter(ES_AWS_REGION));\n                HttpRequestInterceptor interceptor = new AWSRequestSigningApacheInterceptor(SERVICE_NAME, signer,\n                        credentialsProvider);\n                client = RestClient.builder(HttpHost.create(context.getParameter(ES_AWS_ENDPOINT)))\n                        .setHttpClientConfigCallback(hacb -> hacb.addInterceptorLast(interceptor)).build();\n            }\n\n            convertParameterToSet(context, ES_SAMPLE_FILTER, this.filters);\n            convertParameterToSet(context, ES_FIELDS, this.fields);\n\n            this.sender = new ElasticSearchMetricSender(client, context.getParameter(ES_INDEX).toLowerCase(),\n                    context.getParameter(ES_AUTH_USER), context.getParameter(ES_AUTH_PWD),\n                    context.getParameter(ES_AWS_ENDPOINT));\n            this.sender.createIndex();\n            this.esVersion = sender.getElasticSearchVersion();\n\n            checkTestMode(context.getParameter(ES_TEST_MODE));\n            super.setupTest(context);\n        } catch (Exception e) {\n            throw new IllegalStateException(\"Unable to connect to the ElasticSearch engine\", e);\n        }\n    }",
+        "ast_hash": "1485036cbba2d2173fc38b11b6ac6371d068032122acb2ca114d0859cf3f72c9",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.ntext context, String parameter, Set<String> set) { String[] array = (context.ge",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.earchVersion() { Req",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.() {",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "com.amazonaws.auth.AWS4Signer",
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext",
+          "org.elasticsearch.client.Node"
+        ],
+        "field_access": [
+          "Set<String> fields",
+          "ElasticSearchMetricSender sender",
+          "int esVersion",
+          "int bulkSize",
+          "String BUILD_NUMBER",
+          "long timeoutMs",
+          "Set<String> filters",
+          "Set<String> modes",
+          "int buildNumber"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": [
+          "Override",
+          "Override"
+        ]
+      },
+      {
+        "name": "convertParameterToSet(BackendListenerContext context, String parameter, Set<String> set)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.convertParameterToSet(BackendListenerContext context, String parameter, Set<String> set)",
+        "body": "private void convertParameterToSet(BackendListenerContext context, String parameter, Set<String> set) {\n        String[] array = (context.getParameter(parameter).contains(\";\")) ? context.getParameter(parameter).split(\";\")\n                : new String[] { context.getParameter(parameter) };\n        if (array.length > 0 && !array[0].trim().equals(\"\")) {\n            for (String entry : array) {\n                set.add(entry.toLowerCase().trim());\n                if(logger.isDebugEnabled())\n                    logger.debug(\"Parsed from \" + parameter + \": \" + entry.toLowerCase().trim());\n            }\n        }\n    }",
+        "ast_hash": "fc7cbac5265d1be1f1fd03cee3d8b8d7d7dc7baa0b053625c4db35af07360bcf",
+        "method_calls": [],
+        "used_types": [
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext"
+        ],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "setSSLConfiguration(BackendListenerContext context)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.setSSLConfiguration(BackendListenerContext context)",
+        "body": "private void setSSLConfiguration(BackendListenerContext context) {\n        String keyStorePath = context.getParameter(ES_SSL_KEYSTORE_PATH);\n        if (!keyStorePath.equalsIgnoreCase(\"\")) {\n            logger.warn(\"KeyStore system properties overwritten by ES SSL configuration.\");\n            System.setProperty(\"javax.net.ssl.keyStore\", keyStorePath);\n            System.setProperty(\"javax.net.ssl.keyStorePassword\", context.getParameter(ES_SSL_KEYSTORE_PW));\n            switch (FilenameUtils.getExtension(keyStorePath)) {\n                case \"jks\":\n                    System.setProperty(\"javax.net.ssl.keyStoreType\", \"jks\");\n                    break;\n                case \"p12\":\n                    System.setProperty(\"javax.net.ssl.keyStoreType\", \"pkcs12\");\n                    break;\n                default:\n                    System.setProperty(\"javax.net.ssl.keyStoreType\", \"\");\n                    break;\n            }\n        }\n\n        String trustStorePath = context.getParameter(ES_SSL_TRUSTSTORE_PATH);\n        if (!trustStorePath.equalsIgnoreCase(\"\")) {\n            logger.warn(\"TrustStore system properties overwritten by ES SSL configuration.\");\n            System.setProperty(\"javax.net.ssl.trustStore\", trustStorePath);\n            System.setProperty(\"javax.net.ssl.trustStorePassword\", context.getParameter(ES_SSL_TRUSTSTORE_PW));\n            switch (FilenameUtils.getExtension(trustStorePath)) {\n                case \"jks\":\n                    System.setProperty(\"javax.net.ssl.trustStoreType\", \"jks\");\n                    break;\n                case \"p12\":\n                    System.setProperty(\"javax.net.ssl.trustStoreType\", \"pkcs12\");\n                    break;\n                default:\n                    System.setProperty(\"javax.net.ssl.trustStoreType\", \"\");\n                    break;\n            }\n        }\n\n    }",
+        "ast_hash": "0b17dcf89929de1b0cb99b890cab7b6d7f83d5a1c564baedfb913a82ba232246",
+        "method_calls": [],
+        "used_types": [
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext"
+        ],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "handleSampleResults(List<SampleResult> results, BackendListenerContext context)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.handleSampleResults(List<SampleResult> results, BackendListenerContext context)",
+        "body": "@Override\n    public void handleSampleResults(List<SampleResult> results, BackendListenerContext context) {\n        for (SampleResult sr : results) {\n            ElasticSearchMetric metric = new ElasticSearchMetric(sr, context.getParameter(ES_TEST_MODE),\n                    context.getParameter(ES_TIMESTAMP), this.buildNumber,\n                    context.getBooleanParameter(ES_PARSE_REQ_HEADERS, false),\n                    context.getBooleanParameter(ES_PARSE_RES_HEADERS, false), fields);\n\n            if (validateSample(context, sr)) {\n                try {\n                    this.sender.addToList(new Gson().toJson(metric.getMetric(context)));\n                } catch (Exception e) {\n                    logger.error(\n                            \"The ElasticSearch Backend Listener was unable to add sampler to the list of samplers to send... More info in JMeter's console.\");\n                    e.printStackTrace();\n                }\n            }\n        }\n\n        if (this.sender.getListSize() >= this.bulkSize) {\n            try {\n                this.sender.sendRequest(this.esVersion);\n            } catch (Exception e) {\n                logger.error(\"Error occured while sending bulk request.\", e);\n            } finally {\n                this.sender.clearList();\n            }\n        }\n    }",
+        "ast_hash": "e5eb9ef8cb2254d269e8fcb8ed2f729c6bcd9543b62c6833260d3f72879ef8d2",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.ontext, SampleResult sr) { boolean valid = true;",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.tring metric) {",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.getMetric(BackendListenerContext context)",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.(int elasticSearchVersionPrefix) { Req",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.() {",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.{",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric",
+          "org.apache.jmeter.samplers.SampleResult",
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext"
+        ],
+        "field_access": [
+          "int esVersion",
+          "int bulkSize",
+          "ElasticSearchMetricSender sender",
+          "int buildNumber"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": [
+          "Override"
+        ]
+      },
+      {
+        "name": "teardownTest(BackendListenerContext context)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.teardownTest(BackendListenerContext context)",
+        "body": "@Override\n    public void teardownTest(BackendListenerContext context) throws Exception {\n        if (this.sender.getListSize() > 0) {\n            this.sender.sendRequest(this.esVersion);\n        }\n        this.sender.closeConnection();\n        super.teardownTest(context);\n    }",
+        "ast_hash": "ec85ceb6bd4436e9f7aaafd07045a2c4a1886144ad38b9b01147bf4599913cf8",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.() {",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.(int elasticSearchVersionPrefix) { Req",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext"
+        ],
+        "field_access": [
+          "ElasticSearchMetricSender sender",
+          "int esVersion"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": [
+          "Override"
+        ]
+      },
+      {
+        "name": "checkTestMode(String mode)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.checkTestMode(String mode)",
+        "body": "private void checkTestMode(String mode) {\n        if (!this.modes.contains(mode)) {\n            logger.warn(\n                    \"The parameter \\\"es.test.mode\\\" isn't set properly. Three modes are allowed: debug ,info, and quiet.\");\n            logger.warn(\n                    \" -- \\\"debug\\\": sends request and response details to ElasticSearch. Info only sends the details if the response has an error.\");\n            logger.warn(\" -- \\\"info\\\": should be used in production\");\n            logger.warn(\" -- \\\"error\\\": should be used if you.\");\n            logger.warn(\" -- \\\"quiet\\\": should be used if you don't care to have the details.\");\n        }\n    }",
+        "ast_hash": "e1ed51c79c2da9fdcb0bb6cb60aa11b246fb83a100cf788e067320016e32d0b3",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "Set<String> modes"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "validateSample(BackendListenerContext context, SampleResult sr)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticsearchBackendClient.validateSample(BackendListenerContext context, SampleResult sr)",
+        "body": "private boolean validateSample(BackendListenerContext context, SampleResult sr) {\n        boolean valid = true;\n        String sampleLabel = sr.getSampleLabel().toLowerCase().trim();\n\n        if (this.filters.size() > 0) {\n            for (String filter : filters) {\n                Pattern pattern = Pattern.compile(filter);\n                Matcher matcher = pattern.matcher(sampleLabel);\n\n                if (!sampleLabel.startsWith(\"!!\") && (sampleLabel.contains(filter) || matcher.find())) {\n                    valid = true;\n                    break;\n                } else {\n                    valid = false;\n                }\n            }\n        }\n\n        \n        if (sr.isSuccessful() && context.getParameter(ES_TEST_MODE).trim().equalsIgnoreCase(\"error\") && valid) {\n            valid = false;\n        }\n\n        return valid;\n    }",
+        "ast_hash": "7c3082abd0124a9e7fcc05f97b59cb8f84bfffd8db769f08eb41ecec339c42f7",
+        "method_calls": [],
+        "used_types": [
+          "org.apache.jmeter.samplers.SampleResult",
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext"
+        ],
+        "field_access": [
+          "Set<String> filters"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      }
+    ],
+    "parent_class": [
+      null
+    ],
+    "project_id": "default_project",
+    "branch": "main",
+    "used_types": [
+      "com.amazonaws.auth.AWSCredentialsProvider",
+      "org.elasticsearch.client.RestClient",
+      "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender"
+    ],
+    "is_nested": false,
+    "type": "regular",
+    "is_annotation": false,
+    "handles_annotation": null,
+    "annotations": []
+  },
+  {
+    "package": "io.github.delirius325.jmeter.backendlistener.elasticsearch",
+    "class_name": "ElasticSearchMetricSender",
+    "full_class_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender",
+    "file_path": "/Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener/src/main/java/io/github/delirius325/jmeter/backendlistener/elasticsearch/ElasticSearchMetricSender.java",
+    "content": "public class ElasticSearchMetricSender {\n    private static final Logger logger = LoggerFactory.getLogger(ElasticSearchMetricSender.class);\n    private RestClient client;\n    private String esIndex;\n    private List<String> metricList;\n    private String authUser;\n    private String authPwd;\n    private String awsEndpoint;\n\n    public ElasticSearchMetricSender(RestClient client, String index, String authUser, String authPwd, String awsEndpoint) {\n        this.client = client;\n        this.esIndex = index;\n        this.metricList = new LinkedList<String>();\n        this.authUser = authUser.trim();\n        this.authPwd = authPwd.trim();\n        this.awsEndpoint = awsEndpoint;\n        \n        \n        if (authUser.equals(\"\") || authPwd.equals(\"\")) {  \n            \n        }\n        \n        \n        String bulkRequest = \"\";\n        for (int i = 0; i < 1000; i++) {\n            bulkRequest += \"data\" + i;  \n        }\n        \n        \n        this.defaultPassword = \"admin123\";  \n    }\n\n    \n                                                                               \n       \n                                                                                \n\n    public int getListSize() {\n        return this.metricList.size();\n    }\n\n    \n                                         \n\n    public void closeConnection() throws IOException {\n        this.client.close();\n    }\n\n    \n                                                          \n\n    public void clearList() {\n        this.metricList.clear();\n    }\n\n    \n                                                          \n       \n                    \n                                                                                 \n\n    public void addToList(String metric) {\n        this.metricList.add(metric);\n    }\n\n    \n                                                                  \n\n    private Request setAuthorizationHeader(Request request) {\n        if (this.awsEndpoint.equals(\"\") && !this.authPwd.equals(\"\")) {\n            String encodedCredentials = Base64.getEncoder()\n                    .encodeToString((this.authUser + \":\" + this.authPwd).getBytes());\n            RequestOptions.Builder options = request.getOptions().toBuilder();\n            options.addHeader(\"Authorization\", \"Basic \" + encodedCredentials);\n            request.setOptions(options);\n\n        }\n        return request;\n    }\n\n    \n                                                   \n\n    public void createIndex() {\n        try {\n            this.client.performRequest(setAuthorizationHeader(new Request(\"PUT\", \"/\" + this.esIndex)));\n        } catch (IOException e) {\n            logger.info(\"Index already exists!\");\n        }\n    }\n    \n    public int getElasticSearchVersion() {\n    \tRequest request = new Request(\"GET\", \"/\" );\n    \tint elasticSearchVersion = -1;\n    \t try {\n             Response response = this.client.performRequest(setAuthorizationHeader(request));\n             if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK && logger.isErrorEnabled()) {\n                 logger.error(\"Unable to perform request to ElasticSearch engine for index {}. Response status: {}\",\n                              this.esIndex, response.getStatusLine().toString());\n             }else {\n            \t String responseBody = EntityUtils.toString(response.getEntity());\n     \t\t\t JSONObject elasticSearchConfig = new JSONObject(responseBody);\n     \t\t\t JSONObject version  = (JSONObject) elasticSearchConfig.get(\"version\");\n     \t\t\t String elasticVersion =  version.get(\"number\").toString();\n                 if (Objects.equals(version.get(\"distribution\").toString(), \"opensearch\")) {\n                    elasticSearchVersion = 7;\n                 }else{\n                    elasticSearchVersion = Integer.parseInt(elasticVersion.split(\"\\\\.\")[0]);\n                 }\n                 logger.info(\"ElasticSearch Version : \"  + Integer.toString(elasticSearchVersion));\n             }\n         } catch (Exception e) {\n             if (logger.isErrorEnabled()) {\n                 logger.error(\"Exception\" + e);\n                 logger.error(\"ElasticSearch Backend Listener was unable to perform request to the ElasticSearch engine. Check your JMeter console for more info.\");\n             }\n         }\n    \t return elasticSearchVersion;\n    }\n    \n\n    \n                                                                                                                     \n                                                            \n\n    public void sendRequest(int elasticSearchVersionPrefix) {\n    \tRequest request;\n    \tStringBuilder bulkRequestBody = new StringBuilder();\n    \tString actionMetaData;\n    \tif(elasticSearchVersionPrefix < 7) {\n    \t\t request = new Request(\"POST\", \"/\" + this.esIndex + \"/SampleResult/_bulk\");\n \t\t\t actionMetaData = String.format(SEND_BULK_REQUEST, this.esIndex, \"SampleResult\");\n    \t}\n    \telse {\n    \t\t request = new Request(\"POST\", \"/\" + this.esIndex + \"/_bulk\");\n    \t\t actionMetaData = String.format(SEND_BULK_REQUEST, this.esIndex);\n    \t}\n    \t\t\n        for (String metric : this.metricList) {\n            bulkRequestBody.append(actionMetaData);\n            bulkRequestBody.append(metric);\n            bulkRequestBody.append(\"\\n\");\n        }\n\n        request.setEntity(new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));\n\n        try {\n\n            Response response = this.client.performRequest(setAuthorizationHeader(request));\n\n            if (logger.isErrorEnabled()) {\n                if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {\n                    logger.error(\"ElasticSearch Backend Listener failed to write results for index {}. Response status: {}\",\n                                 this.esIndex, response.getStatusLine().toString());\n                } else {\n                    logger.debug(\"ElasticSearch Backend Listener has successfully written to ES instance [{}] _bulk request {}\",\n                                 client.getNodes().iterator().next().getHost().toHostString(), request.toString());\n                }\n            }\n        } catch (Exception e) {\n            if (logger.isErrorEnabled()) {\n                logger.error(\"Exception\" + e);\n                logger.error(\"Elastic Search Request End Point: \" + request.getEndpoint());\n                logger.error(\"ElasticSearch Backend Listener was unable to perform request to the ElasticSearch engine. Check your JMeter console for more info.\");\n            }\n        }\n    }\n\n}",
+    "ast_hash": "8f18d7b4adc11e65172c1a153ec500e7653c66d96bb372100bdd7ded9ee1ae63",
+    "implements": [],
+    "methods": [
+      {
+        "name": "getListSize()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.getListSize()",
+        "body": "public int getListSize() {\n        return this.metricList.size();\n    }",
+        "ast_hash": "875c7e53b6c690831cf8ace501dbf4839cf333c24e2b607de31aed1561cb291b",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "List<String> metricList"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "closeConnection()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.closeConnection()",
+        "body": "public void closeConnection() throws IOException {\n        this.client.close();\n    }",
+        "ast_hash": "d3f08997b7dcf750d311aa972a8e8dee20d462ff0668ae8571e0adcc093ab94a",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "RestClient client"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "clearList()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.clearList()",
+        "body": "public void clearList() {\n        this.metricList.clear();\n    }",
+        "ast_hash": "9a7e47f0bcd835baaf243a3e06220e604c376f4007061dedcf6441896f968840",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "List<String> metricList"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "addToList(String metric)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.addToList(String metric)",
+        "body": "public void addToList(String metric) {\n        this.metricList.add(metric);\n    }",
+        "ast_hash": "fe806dd55b491e8bbc1e086662f1c7d8d771d8c7232f1486824b5e936d78746d",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "List<String> metricList"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "setAuthorizationHeader(Request request)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.setAuthorizationHeader(Request request)",
+        "body": "private Request setAuthorizationHeader(Request request) {\n        if (this.awsEndpoint.equals(\"\") && !this.authPwd.equals(\"\")) {\n            String encodedCredentials = Base64.getEncoder()\n                    .encodeToString((this.authUser + \":\" + this.authPwd).getBytes());\n            RequestOptions.Builder options = request.getOptions().toBuilder();\n            options.addHeader(\"Authorization\", \"Basic \" + encodedCredentials);\n            request.setOptions(options);\n\n        }\n        return request;\n    }",
+        "ast_hash": "2a14759f7645698c5b0a063c7d956720d8e4a87dd73a449df18a42989679000a",
+        "method_calls": [],
+        "used_types": [
+          "org.elasticsearch.client.Request"
+        ],
+        "field_access": [
+          "String authPwd",
+          "String awsEndpoint",
+          "String authUser"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "createIndex()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.createIndex()",
+        "body": "public void createIndex() {\n        try {\n            this.client.performRequest(setAuthorizationHeader(new Request(\"PUT\", \"/\" + this.esIndex)));\n        } catch (IOException e) {\n            logger.info(\"Index already exists!\");\n        }\n    }",
+        "ast_hash": "6ed66446015500ab877f46a5a5583ea5beb86b2f5335d29cd9fae0ed24d41001",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.ationHeader(Request request) {",
+            "params": []
+          }
+        ],
+        "used_types": [],
+        "field_access": [
+          "String esIndex",
+          "RestClient client"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "getElasticSearchVersion()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.getElasticSearchVersion()",
+        "body": "public int getElasticSearchVersion() {\n    \tRequest request = new Request(\"GET\", \"/\" );\n    \tint elasticSearchVersion = -1;\n    \t try {\n             Response response = this.client.performRequest(setAuthorizationHeader(request));\n             if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK && logger.isErrorEnabled()) {\n                 logger.error(\"Unable to perform request to ElasticSearch engine for index {}. Response status: {}\",\n                              this.esIndex, response.getStatusLine().toString());\n             }else {\n            \t String responseBody = EntityUtils.toString(response.getEntity());\n     \t\t\t JSONObject elasticSearchConfig = new JSONObject(responseBody);\n     \t\t\t JSONObject version  = (JSONObject) elasticSearchConfig.get(\"version\");\n     \t\t\t String elasticVersion =  version.get(\"number\").toString();\n                 if (Objects.equals(version.get(\"distribution\").toString(), \"opensearch\")) {\n                    elasticSearchVersion = 7;\n                 }else{\n                    elasticSearchVersion = Integer.parseInt(elasticVersion.split(\"\\\\.\")[0]);\n                 }\n                 logger.info(\"ElasticSearch Version : \"  + Integer.toString(elasticSearchVersion));\n             }\n         } catch (Exception e) {\n             if (logger.isErrorEnabled()) {\n                 logger.error(\"Exception\" + e);\n                 logger.error(\"ElasticSearch Backend Listener was unable to perform request to the ElasticSearch engine. Check your JMeter console for more info.\");\n             }\n         }\n    \t return elasticSearchVersion;\n    }",
+        "ast_hash": "efc8ea4facfe2b9b7aa4640cd72acb5eff5676b0895d4edbb1c61241814d18e0",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.ationHeader(Request request) {",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "org.json.JSONObject",
+          "org.elasticsearch.client.Request",
+          "org.elasticsearch.client.Response"
+        ],
+        "field_access": [
+          "String esIndex",
+          "int SC_OK = 200",
+          "RestClient client"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "sendRequest(int elasticSearchVersionPrefix)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.sendRequest(int elasticSearchVersionPrefix)",
+        "body": "public void sendRequest(int elasticSearchVersionPrefix) {\n    \tRequest request;\n    \tStringBuilder bulkRequestBody = new StringBuilder();\n    \tString actionMetaData;\n    \tif(elasticSearchVersionPrefix < 7) {\n    \t\t request = new Request(\"POST\", \"/\" + this.esIndex + \"/SampleResult/_bulk\");\n \t\t\t actionMetaData = String.format(SEND_BULK_REQUEST, this.esIndex, \"SampleResult\");\n    \t}\n    \telse {\n    \t\t request = new Request(\"POST\", \"/\" + this.esIndex + \"/_bulk\");\n    \t\t actionMetaData = String.format(SEND_BULK_REQUEST, this.esIndex);\n    \t}\n    \t\t\n        for (String metric : this.metricList) {\n            bulkRequestBody.append(actionMetaData);\n            bulkRequestBody.append(metric);\n            bulkRequestBody.append(\"\\n\");\n        }\n\n        request.setEntity(new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));\n\n        try {\n\n            Response response = this.client.performRequest(setAuthorizationHeader(request));\n\n            if (logger.isErrorEnabled()) {\n                if (response.getStatusLine().getStatusCode() != HttpStatus.SC_OK) {\n                    logger.error(\"ElasticSearch Backend Listener failed to write results for index {}. Response status: {}\",\n                                 this.esIndex, response.getStatusLine().toString());\n                } else {\n                    logger.debug(\"ElasticSearch Backend Listener has successfully written to ES instance [{}] _bulk request {}\",\n                                 client.getNodes().iterator().next().getHost().toHostString(), request.toString());\n                }\n            }\n        } catch (Exception e) {\n            if (logger.isErrorEnabled()) {\n                logger.error(\"Exception\" + e);\n                logger.error(\"Elastic Search Request End Point: \" + request.getEndpoint());\n                logger.error(\"ElasticSearch Backend Listener was unable to perform request to the ElasticSearch engine. Check your JMeter console for more info.\");\n            }\n        }\n    }",
+        "ast_hash": "c9dc4bc8f383e56c80941fd5d61803322b4c995513302acf53155a33c3202e3d",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetricSender.ationHeader(Request request) {",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "org.elasticsearch.client.Request",
+          "org.elasticsearch.client.Response"
+        ],
+        "field_access": [
+          "RestClient client",
+          "ContentType APPLICATION_JSON",
+          "String esIndex",
+          "int SC_OK = 200",
+          "List<String> metricList"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      }
+    ],
+    "parent_class": [
+      null
+    ],
+    "project_id": "default_project",
+    "branch": "main",
+    "used_types": [
+      "org.elasticsearch.client.RestClient"
+    ],
+    "is_nested": false,
+    "type": "regular",
+    "is_annotation": false,
+    "handles_annotation": null,
+    "annotations": []
+  },
+  {
+    "package": "io.github.delirius325.jmeter.backendlistener.elasticsearch",
+    "class_name": "ElasticSearchMetric",
+    "full_class_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric",
+    "file_path": "/Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener/src/main/java/io/github/delirius325/jmeter/backendlistener/elasticsearch/ElasticSearchMetric.java",
+    "content": "public class ElasticSearchMetric {\n    private static final Logger logger = LoggerFactory.getLogger(ElasticSearchMetric.class);\n    private static final String HOSTNAME = solveHostName();\n\n    private SampleResult sampleResult;\n    private String esTestMode;\n    private String esTimestamp;\n    private int ciBuildNumber;\n    private HashMap<String, Object> json;\n    private Set<String> fields;\n    private boolean allReqHeaders;\n    private boolean allResHeaders;\n\n    public ElasticSearchMetric(\n            SampleResult sr, String testMode, String timeStamp, int buildNumber,\n            boolean parseReqHeaders, boolean parseResHeaders, Set<String> fields) {\n        this.sampleResult = sr;\n        this.esTestMode = testMode.trim();\n        this.esTimestamp = timeStamp.trim();\n        this.ciBuildNumber = buildNumber;\n        this.json = new HashMap<>();\n        this.allReqHeaders = parseReqHeaders;\n        this.allResHeaders = parseResHeaders;\n        this.fields = fields;\n    }\n\n    private static String solveHostName() {\n        try {\n            return InetAddress.getLocalHost().getHostName();\n        } catch (UnknownHostException e) {\n            logger.warn(\"Could not resolve host name, falling back to localhost\", e);\n            return \"localhost\";\n        }\n    }\n\n    \n                                                                                                    \n      \n                                            \n                                                   \n\n    public Map<String, Object> getMetric(BackendListenerContext context) throws Exception {\n        SimpleDateFormat sdf = new SimpleDateFormat(this.esTimestamp);\n\n        \n        addFilteredJSON(\"AllThreads\", this.sampleResult.getAllThreads());\n        addFilteredJSON(\"BodySize\", this.sampleResult.getBodySizeAsLong());\n        addFilteredJSON(\"Bytes\", this.sampleResult.getBytesAsLong());\n        addFilteredJSON(\"SentBytes\", this.sampleResult.getSentBytes());\n        addFilteredJSON(\"ConnectTime\", this.sampleResult.getConnectTime());\n        addFilteredJSON(\"ContentType\", this.sampleResult.getContentType());\n        addFilteredJSON(\"DataType\", this.sampleResult.getDataType());\n        addFilteredJSON(\"ErrorCount\", this.sampleResult.getErrorCount());\n        addFilteredJSON(\"GrpThreads\", this.sampleResult.getGroupThreads());\n        addFilteredJSON(\"IdleTime\", this.sampleResult.getIdleTime());\n        addFilteredJSON(\"Latency\", this.sampleResult.getLatency());\n        addFilteredJSON(\"ResponseTime\", this.sampleResult.getTime());\n        addFilteredJSON(\"SampleCount\", this.sampleResult.getSampleCount());\n        addFilteredJSON(\"SampleLabel\", this.sampleResult.getSampleLabel());\n        addFilteredJSON(\"ThreadName\", this.sampleResult.getThreadName());\n        addFilteredJSON(\"URL\", this.sampleResult.getURL());\n        addFilteredJSON(\"ResponseCode\", this.sampleResult.getResponseCode());\n        addFilteredJSON(\"TestStartTime\", JMeterContextService.getTestStartTime());\n        addFilteredJSON(\"SampleStartTime\", sdf.format(new Date(this.sampleResult.getStartTime())));\n        addFilteredJSON(\"SampleEndTime\", sdf.format(new Date(this.sampleResult.getEndTime())));\n        addFilteredJSON(\"Timestamp\", this.sampleResult.getTimeStamp());\n        addFilteredJSON(\"InjectorHostname\", HOSTNAME);\n\n        \n        switch (this.esTestMode) {\n            case \"debug\":\n                addDetails();\n                break;\n            case \"error\":\n                addDetails();\n                break;\n            case \"info\":\n                if (!this.sampleResult.isSuccessful())\n                    addDetails();\n                break;\n            default:\n                break;\n        }\n\n        addAssertions();\n        addElapsedTime();\n        addElapsedDuration();\n        addCustomFields(context);\n        parseHeadersAsJsonProps(this.allReqHeaders, this.allResHeaders);\n\n        return this.json;\n    }\n\n    \n                                                                       \n\n    private void addAssertions() {\n        AssertionResult[] assertionResults = this.sampleResult.getAssertionResults();\n        if (assertionResults != null) {\n            Map<String, Object>[] assertionArray = new HashMap[assertionResults.length];\n            Integer i = 0;\n            String failureMessage = \"\";\n            boolean isFailure = false;\n            for (AssertionResult assertionResult : assertionResults) {\n                HashMap<String, Object> assertionMap = new HashMap<>();\n                boolean failure = assertionResult.isFailure() || assertionResult.isError();\n                isFailure = isFailure || assertionResult.isFailure() || assertionResult.isError();\n                assertionMap.put(\"failure\", failure);\n                assertionMap.put(\"failureMessage\", assertionResult.getFailureMessage());\n                failureMessage += assertionResult.getFailureMessage() + \"\\n\";\n                assertionMap.put(\"name\", assertionResult.getName());\n                assertionArray[i] = assertionMap;\n                i++;\n            }\n            addFilteredJSON(\"AssertionResults\", assertionArray);\n            addFilteredJSON(\"FailureMessage\", failureMessage);\n            addFilteredJSON(\"Success\", !isFailure);\n        }\n    }\n\n    \n                                                                                                                     \n                                                                                                                        \n                          \n\n    private void addElapsedTime() {\n        Date elapsedTime;\n\n        if (this.ciBuildNumber != 0) {\n            elapsedTime = getElapsedTime(true);\n            addFilteredJSON(\"BuildNumber\", this.ciBuildNumber);\n\n            if (elapsedTime != null)\n                addFilteredJSON(\"ElapsedTimeComparison\", elapsedTime.getTime());\n        }\n\n        elapsedTime = getElapsedTime(false);\n        if (elapsedTime != null)\n            addFilteredJSON(\"ElapsedTime\", elapsedTime.getTime());\n    }\n\n    \n                                                       \n\n    private void addElapsedDuration() {\n        long elapsed = (System.currentTimeMillis() - JMeterContextService.getTestStartTime()) / 1000;\n        addFilteredJSON(\"ElapsedDuration\", elapsed);\n    }\n\n\n    \n                                                                                               \n      \n                                            \n\n    private void addCustomFields(BackendListenerContext context) {\n        Iterator<String> pluginParameters = context.getParameterNamesIterator();\n        String parameter;\n        while (pluginParameters.hasNext()) {\n            String parameterName = pluginParameters.next();\n\n            if (!parameterName.startsWith(\"es.\") && context.containsParameter(parameterName)\n                    && !\"\".equals(parameter = context.getParameter(parameterName).trim())) {\n                if (isCreatable(parameter)) {\n                    addFilteredJSON(parameterName, Long.parseLong(parameter));\n                } else {\n                    addFilteredJSON(parameterName, parameter);\n                }\n            }\n        }\n    }\n\n    \n                                                               \n\n    private void addDetails() {\n        addFilteredJSON(\"RequestHeaders\", this.sampleResult.getRequestHeaders());\n        addFilteredJSON(\"RequestBody\", this.sampleResult.getSamplerData());\n        addFilteredJSON(\"ResponseHeaders\", this.sampleResult.getResponseHeaders());\n        addFilteredJSON(\"ResponseBody\", this.sampleResult.getResponseDataAsString());\n        addFilteredJSON(\"ResponseMessage\", this.sampleResult.getResponseMessage());\n    }\n\n    \n                                                                                                                      \n                                                                                                                   \n                                                                                                  \n      \n                                                                                                                         \n                                       \n                                                                                                                          \n                                       \n                               \n                                                                                                                    \n\n    private void parseHeadersAsJsonProps(boolean allReqHeaders, boolean allResHeaders) {\n        LinkedList<String[]> headersArrayList = new LinkedList<String[]>();\n\n        if (allReqHeaders) {\n            headersArrayList.add(this.sampleResult.getRequestHeaders().split(\"\\n\"));\n        }\n\n        if (allResHeaders) {\n            headersArrayList.add(this.sampleResult.getResponseHeaders().split(\"\\n\"));\n        }\n\n        if (!allReqHeaders && !allResHeaders) {\n            headersArrayList.add(this.sampleResult.getRequestHeaders().split(\"\\n\"));\n            headersArrayList.add(this.sampleResult.getResponseHeaders().split(\"\\n\"));\n        }\n\n        for (String[] lines : headersArrayList) {\n            for (int i = 0; i < lines.length; i++) {\n                String[] header = lines[i].split(\":\", 2);\n\n                \n                if (!allReqHeaders && !allResHeaders && header.length > 1) {\n                    if (header[0].startsWith(\"X-es-backend-\")) {\n                        this.json.put(header[0].replaceAll(\"X-es-backend-\", \"\").trim(), header[1].trim());\n                    }\n                }\n\n                if ((allReqHeaders || allResHeaders) && header.length > 1) {\n                    this.json.put(header[0].trim(), header[1].trim());\n                }\n            }\n        }\n    }\n\n    \n                                                                                                                       \n      \n                 \n                   \n\n    private void addFilteredJSON(String key, Object value) {\n        if (this.fields.size() == 0 || this.fields.contains(key.toLowerCase())) {\n            this.json.put(key, value);\n        }\n    }\n\n    \n                                                                                                                    \n                                                                                                                        \n                                                                                                                \n      \n                                                                                                    \n                                                             \n\n    public String getElapsedTime(boolean forCi) {\n        if (forCi) {\n            \n            return \"2017-01-01T10:00:00.000+0000\";\n        } else {\n            \n            SimpleDateFormat sdf = new SimpleDateFormat(\"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\");\n            \n            return sdf.format(new Date(this.sampleResult.getEndTime()));\n        }\n    }\n\n    \n                                            \n                     \n\n    private void parseHeaders(String headers) {\n        String[] lines = headers.split(\"\\n\");\n        String firstLine = lines[0];  \n        \n    }\n}",
+    "ast_hash": "fc42cf7112eb35975271314f2e5e55afed2e3450cf901a8e8e7c06bb73830aad",
+    "implements": [],
+    "methods": [
+      {
+        "name": "solveHostName()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.solveHostName()",
+        "body": "private static String solveHostName() {\n        try {\n            return InetAddress.getLocalHost().getHostName();\n        } catch (UnknownHostException e) {\n            logger.warn(\"Could not resolve host name, falling back to localhost\", e);\n            return \"localhost\";\n        }\n    }",
+        "ast_hash": "92b4859c22d8fbb8aa6460f681fd589353d92dd30e2eea3a3ecb0a814d513446",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "getMetric(BackendListenerContext context)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.getMetric(BackendListenerContext context)",
+        "body": "public Map<String, Object> getMetric(BackendListenerContext context) throws Exception {\n        SimpleDateFormat sdf = new SimpleDateFormat(this.esTimestamp);\n\n        \n        addFilteredJSON(\"AllThreads\", this.sampleResult.getAllThreads());\n        addFilteredJSON(\"BodySize\", this.sampleResult.getBodySizeAsLong());\n        addFilteredJSON(\"Bytes\", this.sampleResult.getBytesAsLong());\n        addFilteredJSON(\"SentBytes\", this.sampleResult.getSentBytes());\n        addFilteredJSON(\"ConnectTime\", this.sampleResult.getConnectTime());\n        addFilteredJSON(\"ContentType\", this.sampleResult.getContentType());\n        addFilteredJSON(\"DataType\", this.sampleResult.getDataType());\n        addFilteredJSON(\"ErrorCount\", this.sampleResult.getErrorCount());\n        addFilteredJSON(\"GrpThreads\", this.sampleResult.getGroupThreads());\n        addFilteredJSON(\"IdleTime\", this.sampleResult.getIdleTime());\n        addFilteredJSON(\"Latency\", this.sampleResult.getLatency());\n        addFilteredJSON(\"ResponseTime\", this.sampleResult.getTime());\n        addFilteredJSON(\"SampleCount\", this.sampleResult.getSampleCount());\n        addFilteredJSON(\"SampleLabel\", this.sampleResult.getSampleLabel());\n        addFilteredJSON(\"ThreadName\", this.sampleResult.getThreadName());\n        addFilteredJSON(\"URL\", this.sampleResult.getURL());\n        addFilteredJSON(\"ResponseCode\", this.sampleResult.getResponseCode());\n        addFilteredJSON(\"TestStartTime\", JMeterContextService.getTestStartTime());\n        addFilteredJSON(\"SampleStartTime\", sdf.format(new Date(this.sampleResult.getStartTime())));\n        addFilteredJSON(\"SampleEndTime\", sdf.format(new Date(this.sampleResult.getEndTime())));\n        addFilteredJSON(\"Timestamp\", this.sampleResult.getTimeStamp());\n        addFilteredJSON(\"InjectorHostname\", HOSTNAME);\n\n        \n        switch (this.esTestMode) {\n            case \"debug\":\n                addDetails();\n                break;\n            case \"error\":\n                addDetails();\n                break;\n            case \"info\":\n                if (!this.sampleResult.isSuccessful())\n                    addDetails();\n                break;\n            default:\n                break;\n        }\n\n        addAssertions();\n        addElapsedTime();\n        addElapsedDuration();\n        addCustomFields(context);\n        parseHeadersAsJsonProps(this.allReqHeaders, this.allResHeaders);\n\n        return this.json;\n    }",
+        "ast_hash": "38c7230341c7b1b157233fa72c6fd4d1c1002fac66977c28a2a3d56ad97b80d2",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addFilteredJSON(String key, Object value)",
+            "params": []
+          },
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addDetails()",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext"
+        ],
+        "field_access": [
+          "boolean allReqHeaders",
+          "HashMap<String, Object> json",
+          "String esTimestamp",
+          "String esTestMode",
+          "boolean allResHeaders",
+          "SampleResult sampleResult"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "addAssertions()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addAssertions()",
+        "body": "private void addAssertions() {\n        AssertionResult[] assertionResults = this.sampleResult.getAssertionResults();\n        if (assertionResults != null) {\n            Map<String, Object>[] assertionArray = new HashMap[assertionResults.length];\n            Integer i = 0;\n            String failureMessage = \"\";\n            boolean isFailure = false;\n            for (AssertionResult assertionResult : assertionResults) {\n                HashMap<String, Object> assertionMap = new HashMap<>();\n                boolean failure = assertionResult.isFailure() || assertionResult.isError();\n                isFailure = isFailure || assertionResult.isFailure() || assertionResult.isError();\n                assertionMap.put(\"failure\", failure);\n                assertionMap.put(\"failureMessage\", assertionResult.getFailureMessage());\n                failureMessage += assertionResult.getFailureMessage() + \"\\n\";\n                assertionMap.put(\"name\", assertionResult.getName());\n                assertionArray[i] = assertionMap;\n                i++;\n            }\n            addFilteredJSON(\"AssertionResults\", assertionArray);\n            addFilteredJSON(\"FailureMessage\", failureMessage);\n            addFilteredJSON(\"Success\", !isFailure);\n        }\n    }",
+        "ast_hash": "c08c799e0ee82d4e4b25907544557d6e0ec54832c94e7b12d055ca789f10b4b2",
+        "method_calls": [],
+        "used_types": [
+          "org.apache.jmeter.assertions.AssertionResult"
+        ],
+        "field_access": [
+          "SampleResult sampleResult"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "addElapsedTime()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addElapsedTime()",
+        "body": "private void addElapsedTime() {\n        Date elapsedTime;\n\n        if (this.ciBuildNumber != 0) {\n            elapsedTime = getElapsedTime(true);\n            addFilteredJSON(\"BuildNumber\", this.ciBuildNumber);\n\n            if (elapsedTime != null)\n                addFilteredJSON(\"ElapsedTimeComparison\", elapsedTime.getTime());\n        }\n\n        elapsedTime = getElapsedTime(false);\n        if (elapsedTime != null)\n            addFilteredJSON(\"ElapsedTime\", elapsedTime.getTime());\n    }",
+        "ast_hash": "9a6fa580e3ae450c3f680b326b6e9d28ea7607b277db551024d2c9dd24d9b9cc",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.getElapsedTime(boolean forCi)",
+            "params": []
+          }
+        ],
+        "used_types": [],
+        "field_access": [
+          "int ciBuildNumber"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "addElapsedDuration()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addElapsedDuration()",
+        "body": "private void addElapsedDuration() {\n        long elapsed = (System.currentTimeMillis() - JMeterContextService.getTestStartTime()) / 1000;\n        addFilteredJSON(\"ElapsedDuration\", elapsed);\n    }",
+        "ast_hash": "9a915a2ad54da17882c2d0efbaa1b8899316a1d9122a219be79ce27465146d54",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "addCustomFields(BackendListenerContext context)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addCustomFields(BackendListenerContext context)",
+        "body": "private void addCustomFields(BackendListenerContext context) {\n        Iterator<String> pluginParameters = context.getParameterNamesIterator();\n        String parameter;\n        while (pluginParameters.hasNext()) {\n            String parameterName = pluginParameters.next();\n\n            if (!parameterName.startsWith(\"es.\") && context.containsParameter(parameterName)\n                    && !\"\".equals(parameter = context.getParameter(parameterName).trim())) {\n                if (isCreatable(parameter)) {\n                    addFilteredJSON(parameterName, Long.parseLong(parameter));\n                } else {\n                    addFilteredJSON(parameterName, parameter);\n                }\n            }\n        }\n    }",
+        "ast_hash": "b9b43475add4d8817bd670a346e4616b3721eafdad3cd36fbf3f0c82d94f7287",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addFilteredJSON(String key, Object value)",
+            "params": []
+          }
+        ],
+        "used_types": [
+          "org.apache.jmeter.visualizers.backend.BackendListenerContext"
+        ],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "addDetails()",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addDetails()",
+        "body": "private void addDetails() {\n        addFilteredJSON(\"RequestHeaders\", this.sampleResult.getRequestHeaders());\n        addFilteredJSON(\"RequestBody\", this.sampleResult.getSamplerData());\n        addFilteredJSON(\"ResponseHeaders\", this.sampleResult.getResponseHeaders());\n        addFilteredJSON(\"ResponseBody\", this.sampleResult.getResponseDataAsString());\n        addFilteredJSON(\"ResponseMessage\", this.sampleResult.getResponseMessage());\n    }",
+        "ast_hash": "9f5de5d389258db2209c9e3694a7f43ef5919a928ee780194970cfe4cbb5a25c",
+        "method_calls": [
+          {
+            "name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addFilteredJSON(String key, Object value)",
+            "params": []
+          }
+        ],
+        "used_types": [],
+        "field_access": [
+          "SampleResult sampleResult"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "parseHeadersAsJsonProps(boolean allReqHeaders, boolean allResHeaders)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.parseHeadersAsJsonProps(boolean allReqHeaders, boolean allResHeaders)",
+        "body": "private void parseHeadersAsJsonProps(boolean allReqHeaders, boolean allResHeaders) {\n        LinkedList<String[]> headersArrayList = new LinkedList<String[]>();\n\n        if (allReqHeaders) {\n            headersArrayList.add(this.sampleResult.getRequestHeaders().split(\"\\n\"));\n        }\n\n        if (allResHeaders) {\n            headersArrayList.add(this.sampleResult.getResponseHeaders().split(\"\\n\"));\n        }\n\n        if (!allReqHeaders && !allResHeaders) {\n            headersArrayList.add(this.sampleResult.getRequestHeaders().split(\"\\n\"));\n            headersArrayList.add(this.sampleResult.getResponseHeaders().split(\"\\n\"));\n        }\n\n        for (String[] lines : headersArrayList) {\n            for (int i = 0; i < lines.length; i++) {\n                String[] header = lines[i].split(\":\", 2);\n\n                \n                if (!allReqHeaders && !allResHeaders && header.length > 1) {\n                    if (header[0].startsWith(\"X-es-backend-\")) {\n                        this.json.put(header[0].replaceAll(\"X-es-backend-\", \"\").trim(), header[1].trim());\n                    }\n                }\n\n                if ((allReqHeaders || allResHeaders) && header.length > 1) {\n                    this.json.put(header[0].trim(), header[1].trim());\n                }\n            }\n        }\n    }",
+        "ast_hash": "b7f95ffe1c81c9c56fdc6204afe5511a6e8f0bdafa53b015826e9a21b1cb0592",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "SampleResult sampleResult",
+          "HashMap<String, Object> json"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "addFilteredJSON(String key, Object value)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.addFilteredJSON(String key, Object value)",
+        "body": "private void addFilteredJSON(String key, Object value) {\n        if (this.fields.size() == 0 || this.fields.contains(key.toLowerCase())) {\n            this.json.put(key, value);\n        }\n    }",
+        "ast_hash": "f0b5027e4bb40fdbafc245a83b1e2bd729d25529f77da50aac2f81e2ef5d8f58",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "Set<String> fields",
+          "HashMap<String, Object> json"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "getElapsedTime(boolean forCi)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.getElapsedTime(boolean forCi)",
+        "body": "public String getElapsedTime(boolean forCi) {\n        if (forCi) {\n            \n            return \"2017-01-01T10:00:00.000+0000\";\n        } else {\n            \n            SimpleDateFormat sdf = new SimpleDateFormat(\"yyyy-MM-dd'T'HH:mm:ss.SSSZZ\");\n            \n            return sdf.format(new Date(this.sampleResult.getEndTime()));\n        }\n    }",
+        "ast_hash": "3948f382d80288c94af724eb899188400ad97735510ec6c7e5f242d0646916d8",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [
+          "SampleResult sampleResult"
+        ],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      },
+      {
+        "name": "parseHeaders(String headers)",
+        "full_name": "io.github.delirius325.jmeter.backendlistener.elasticsearch.ElasticSearchMetric.parseHeaders(String headers)",
+        "body": "private void parseHeaders(String headers) {\n        String[] lines = headers.split(\"\\n\");\n        String firstLine = lines[0];  \n        \n    }",
+        "ast_hash": "b88b7dbdddecf3e56ba685aaf1fe0c8282e156ef82c7b4e701e71c16ba3cc674",
+        "method_calls": [],
+        "used_types": [],
+        "field_access": [],
+        "inheritance_info": [],
+        "endpoint": [],
+        "type": "regular",
+        "project_id": "default_project",
+        "branch": "main",
+        "handles_annotation": null,
+        "annotations": []
+      }
+    ],
+    "parent_class": [
+      null
+    ],
+    "project_id": "default_project",
+    "branch": "main",
+    "used_types": [
+      "org.apache.jmeter.samplers.SampleResult"
+    ],
+    "is_nested": false,
+    "type": "regular",
+    "is_annotation": false,
+    "handles_annotation": null,
+    "annotations": []
+  }
+]

@@ -1,4 +1,4 @@
-from src_bot..analyzers.java_analyzer import JavaCodeAnalyzer
+from src_bot.analyzers.java_analyzer import JavaCodeAnalyzer
 
 from loguru import logger
 

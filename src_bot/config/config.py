@@ -20,6 +20,15 @@ class Configs(BaseSettings):
     DATETIME_FORMAT: str = "%Y-%m-%dT%H:%M:%S"
     DATE_FORMAT: str = "%Y-%m-%d"
 
+    # Database configuration (optional, not used by this bot)
+    DB_ENGINE: str = os.getenv("DB_ENGINE", "")
+    DB_USER: str = os.getenv("DB_USER", "")
+    DB_PASSWORD: str = os.getenv("DB_PASSWORD", "")
+    DB_HOST: str = os.getenv("DB_HOST", "localhost")
+    DB_PORT: str = os.getenv("DB_PORT", "5432")
+    DB_DATABASE: str = os.getenv("DB_DATABASE", "")
+    DATABASE_URI_FORMAT: str = "{db_engine}://{user}:{password}@{host}:{port}/{database}"
+    
     @property
     def DATABASE_URI(self) -> str:
         """Build database URI only if password is provided."""

@@ -14,8 +14,8 @@ import google.generativeai as genai
 # Thêm import từ project của bạn
 # Giả định rằng bạn chạy script này từ thư mục gốc của project
 # Ví dụ: python evaluate_metrics.py ...
-from src_bot..service import bot_service_instance
-from src_bot..bot import bot_instance
+from src_bot.service import bot_service_instance
+from src_bot.bot import bot_instance
 
 # Tải tài nguyên cho NLTK (chỉ cần chạy lần đầu)
 try:

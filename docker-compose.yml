@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5.15-community
+    container_name: neo4j_code_bot 
+    ports:
+      - "7474:7474"  
+      - "7687:7687"  # Bolt
+    env_file:
+      - .env
+    environment:
+      - NEO4J_AUTH=${APP_NEO4J_USER}/${APP_NEO4J_PASSWORD}
+      
+      - NEO4J_PLUGINS=["apoc"]
+      - NEO4J_apoc_export_file_enabled=true
+      - NEO4J_apoc_import_file_enabled=true
+      - NEO4J_apoc_import_file_use__neo4j__config=true
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+    volumes:
+      # Dùng named volumes để lưu trữ dữ liệu
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:

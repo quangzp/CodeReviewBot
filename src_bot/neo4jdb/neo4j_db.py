@@ -1,5 +1,5 @@
 from neo4j import GraphDatabase
-from src_bot..config.config import configs
+from src_bot.config.config import configs
 
 
 class Neo4jDB:

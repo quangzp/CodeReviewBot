@@ -31,7 +31,7 @@ class BotService:
             files = pr.get_files()
             code_files = [f for f in files if f.filename.endswith(('.py', '.js', '.java', '.cpp', '.ts', '.go', '.rb'))]
 
-            diff_response = requests.get(pr.url, headers={"Authorization": f"token {self.github_auth.token}", "Accept": "application/vnd.github.v3.diff"})
+            diff_response = requests.get(pr.diff_url, headers={"Authorization": f"token {self.github_token}", "Accept": "application/vnd.github.v3.diff"})
             diff_content = diff_response.text
             patch_set = PatchSet(diff_content)
 
@@ -66,7 +66,11 @@ class BotService:
             if not line.is_removed:
                 valid_line = line.target_line_no
                 break
-        last_commit = pr.get_commits()[pr.commits - 1]
+        commits = list(pr.get_commits())
+        last_commit = commits[-1] if commits else None
+        if not last_commit:
+            print(f"No commits found for PR {pr.number}")
+            return
         if valid_line:
             try:
                 pr.create_review_comment(
@@ -78,5 +82,14 @@ class BotService:
                 )
             except Exception as e:
                 print(f"  -> Error: {e}")
+    
+    def get_pr(self, repo_name: str, pr_number: int):
+        """Get a PullRequest object for the given repository and PR number."""
+        repo = self.github_client.get_repo(repo_name)
+        return repo.get_pull(pr_number)
+    
+    def get_pr_files(self, pr: PullRequest):
+        """Get all files changed in a Pull Request."""
+        return pr.get_files()
 
 bot_service_instance = BotService()
