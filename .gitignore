@@ -5,3 +5,4 @@ policy.txt
 test_data_output.json
 git_test.py
 *test*
+ingest_to_weaviate.py

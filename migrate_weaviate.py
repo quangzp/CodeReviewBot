@@ -1,11 +1,69 @@
-import json
 import weaviate
+import os
+from weaviate.classes.config import Configure, Property, DataType
 from weaviate.util import generate_uuid5
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer
 from src_bot.neo4jdb.neo4j_db import Neo4jDB
 
-def ingest_to_weaviate():
+def init_weaviate(client : weaviate.WeaviateClient = None, collection_name: str = None):
+    COLLECTION = collection_name
+    
+    if not COLLECTION:
+        raise ValueError("WEAVIATE_COLLECTION_NAME is not set in environment variables.")
+
+    try:
+        client.collections.delete(COLLECTION)
+        print(f"Đã xóa {COLLECTION}")
+
+        client.collections.create(
+        name=COLLECTION,
+        vector_config=Configure.Vectors.self_provided(), #tự cung cấp cho db embedding
+        properties=[
+            Property(
+                name="name",
+                data_type=DataType.TEXT,
+                index_filterable=True,
+                index_searchable=True,
+            ),
+            Property(
+                name="content",
+                data_type=DataType.TEXT,
+                index_filterable=True,
+                index_searchable=True,
+            ),
+            Property(
+                name="file_path",
+                data_type=DataType.TEXT,
+                index_filterable=True,
+                index_searchable=True,
+            ),
+            Property(
+                name="node_type",
+                data_type=DataType.TEXT,
+                index_filterable=True,
+                index_searchable=False,
+            ),
+            Property(
+                name="ast_hash",
+                data_type=DataType.TEXT,
+                index_filterable=True,
+                index_searchable=False,
+            ),
+        ],
+    )
+
+        print("✅ Collection created")
+    except Exception:
+        pass
+    finally:
+        client.close()
+
+def ingest_to_weaviate(client : weaviate.WeaviateClient = None, collection_name: str = None):
+
+    if not collection_name:
+        raise ValueError("WEAVIATE_COLLECTION_NAME is not set in environment variables.")
+
     db = Neo4jDB()
 
     def run_query(query, params=None):
@@ -51,11 +109,7 @@ def ingest_to_weaviate():
     for i, chunk in enumerate(chunks):
         chunk["embedding"] = embeddings[i].tolist()
 
-    client = weaviate.connect_to_local()
-
-    COLLECTION = "CodeBotCollection"
-
-    collection = client.collections.use(COLLECTION)
+    collection = client.collections.use(collection_name)
 
     # Batch ingest + progress bar
     with collection.batch.fixed_size(batch_size=10) as batch:
@@ -94,3 +148,9 @@ def ingest_to_weaviate():
         print("First failed object:", failed[0])
 
     client.close()
+
+if __name__ == "__main__":
+    client = weaviate.connect_to_local()
+    collection_name = os.getenv("WEAVIATE_COLLECTION_NAME", None)
+    init_weaviate(client, collection_name)
+    ingest_to_weaviate(client, collection_name)
