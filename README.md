@@ -83,3 +83,56 @@ graph TD
     %% Output
     Agent -->|9. Post Comments| GH
 ```
+
+---
+
+## Cách cài đặt
+
+### 1.Tạo virtual environment
+
+```bash
+python -m venv .venv
+# Windows
+.venv\Scripts\activate
+# Linux/Mac
+source .venv/bin/activate
+```
+
+### 2. Cài đặt dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Cấu hình biến môi trường
+Sử dụng file `.env` để khai báo các biến môi trường, xem ví dụ trong file `.env-example`
+
+
+### 4. Cấu hình Neo4j và Weaviate database
+
+```bash
+TODO
+```
+
+### 5. Chạy bot
+```bash
+python run_server.py
+```
+
+### 6.Cài Đặt ngrok (Public IP) (Optional)
+Hiện tại bot đang chạy với cổng `localhost:8000`, chúng ta cần public cổng này để Github/Gitlab có thể truyền sự kiện pull request qua webhook.
+#### Bước 1: Cài đặt ngrok qua pip
+
+```bash
+pip install pyngrok
+```
+
+Tham khảo cách tạo và lấy Ngrok token qua: (https://ngrok.com/)
+
+#### Bước 2: Chạy ngrok
+
+```
+ngrok config add-authtoken YOUR_NGROK_TOKEN
+ngrok http 8000
+```
+
