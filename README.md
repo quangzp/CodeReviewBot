@@ -51,15 +51,15 @@ Hệ thống được thiết kế theo mô hình Hybrid Retrieval, tận dụng
 graph TD
     %% Trigger Layer
     User[User] -->|Push / PR| GH[GitHub / GitLab]
-    GH -->|Webhook Trigger| CI[CI Pipeline]
+    GH -->|Webhook Trigger| Code[Source Code]
 
     %% Ingestion Layer
-    subgraph Ingestion["Ingestion Pipeline (ETL)"]
-        CI -->|1. Parse Code| Joern[Joern Parsing]
-        Joern -->|Generate| CPG[Code Property Graph]
-        CPG -->|2. Import Nodes / Edges| Neo4j[Neo4j Graph DB]
+    subgraph Ingestion["Ingestion"]
+        Code -->|1. Parse Code| Parser[Tree-sitter Parser]
+        Parser -->|Analysis| Analyzer[Code Analyzer]
+        Analyzer --> |Code Chunking| Chunker[Code Chunker]
+        Chunker -->|2. Import Nodes / Edges| Neo4j[Neo4j Graph DB]
         
-        CI -->|3. Code Chunking| Chunker[Code Chunker]
         Chunker -->|4. Generate Vectors| EmbedModel[Embedding Model]
         
         EmbedModel -.->|Semantic Vector| Weaviate[Weaviate Vector DB]
@@ -73,8 +73,8 @@ graph TD
         GH -->|6. Fetch Diff| Agent
         Agent -->|7. Query Context| Retriever
         
-        Retriever -->|Semantic Search| Weaviate
-        Retriever -->|Structural Traversal| Neo4j
+        Retriever <-->|Semantic Search| Weaviate
+        Retriever <-->|Structural Traversal| Neo4j
         
         Agent -->|8. Context + Diff| LLM[LLM]
         LLM -->|Review Comments| Agent
