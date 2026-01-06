@@ -43,7 +43,7 @@ Hệ thống kết hợp sức mạnh của ba trụ cột chính:
 
 ## 🏗 Kiến trúc Hệ thống (System Architecture)
 
-Hệ thống được thiết kế theo mô hình Hybrid Retrieval, tận dụng cả Vector Embedding (cho ngữ nghĩa) và Graph Embedding (cho cấu trúc).
+Hệ thống được thiết kế theo mô hình Hybrid Retrieval, tận dụng cả Vector Database (cho ngữ nghĩa) và Graph Database (cho cấu trúc).
 
 ### Sơ đồ luồng dữ liệu (Data Flow)
 
