@@ -1,4 +1,5 @@
 fastapi
+uvicorn[standard]
 ollama
 python-dotenv~=1.1.1
 neo4j==5.14.0
@@ -10,3 +11,16 @@ langchain-ollama
 PyGithub
 unidiff
 sentence_transformers
+google-generativeai
+tree-sitter==0.25.1
+tree-sitter-language-pack==0.9.0
+loguru~=0.7.3
+nltk
+requests
+transformers
+torch
+scikit-learn
+numpy
+javalang
+uvicorn
+psutil

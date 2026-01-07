@@ -38,6 +38,11 @@ class GraphRAGBot:
         if not self.app:
             raise Exception("Bot chưa được initialize!")
         return self.app.invoke(inputs)
+    
+    def review(self, pr_diff: str) -> str:
+        """Convenience method to review a PR diff and return the review text."""
+        result = self.invoke({"pr_diff": pr_diff})
+        return result.get("final_review", "")
 
     def close(self):
         if self.retriever:

@@ -1,0 +1,53 @@
+2026-01-06 17:56:14,657 - __main__ - INFO - Bắt đầu phân tích project tại: /Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener
+2026-01-06 17:57:11,308 - __main__ - INFO - Phân tích hoàn tất. Tìm thấy 6 code chunks (classes/interfaces/enums).
+2026-01-06 17:57:11,311 - __main__ - ERROR - Lỗi trong quá trình phân tích: Object of type ChunkType is not JSON serializable
+Traceback (most recent call last):
+  File "/Users/manhnguyen/Project/CodeReviewBot/run_analyzer.py", line 63, in main
+    json.dump(chunks_for_json, f, indent=4, ensure_ascii=False)
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/__init__.py", line 179, in dump
+    for chunk in iterable:
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/encoder.py", line 429, in _iterencode
+    yield from _iterencode_list(o, _current_indent_level)
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/encoder.py", line 325, in _iterencode_list
+    yield from chunks
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/encoder.py", line 405, in _iterencode_dict
+    yield from chunks
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/encoder.py", line 325, in _iterencode_list
+    yield from chunks
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/encoder.py", line 405, in _iterencode_dict
+    yield from chunks
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/encoder.py", line 438, in _iterencode
+    o = _default(o)
+  File "/opt/homebrew/Cellar/python@3.10/3.10.19_1/Frameworks/Python.framework/Versions/3.10/lib/python3.10/json/encoder.py", line 179, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type ChunkType is not JSON serializable
+2026-01-06 18:47:13,724 - __main__ - INFO - Bắt đầu phân tích project tại: /Users/manhnguyen/Project/jmeter-elasticsearch-backend-listener
+2026-01-06 18:47:36,304 - __main__ - INFO - Phân tích hoàn tất. Tìm thấy 6 code chunks (classes/interfaces/enums).
+2026-01-06 18:47:36,311 - __main__ - INFO - Đã xuất dữ liệu phân tích ra file: output/jmeter_data.json
+2026-01-06 18:47:36,311 - __main__ - INFO - Đang nhập dữ liệu vào Neo4j...
+2026-01-06 18:47:36,400 - __main__ - ERROR - Lỗi trong quá trình phân tích: {code: Neo.ClientError.Procedure.ProcedureNotFound} {message: There is no procedure with the name `apoc.create.node` registered for this database instance. Please ensure you've spelled the procedure name correctly and that the procedure is properly deployed.}
+Traceback (most recent call last):
+  File "/Users/manhnguyen/Project/CodeReviewBot/run_analyzer.py", line 92, in main
+    neo4j_service.import_code_chunks_simple(
+  File "/Users/manhnguyen/Project/CodeReviewBot/src_bot/neo4jdb/neo4j_service.py", line 1265, in import_code_chunks_simple
+    self.execute_queries_batch(queries_with_params)
+  File "/Users/manhnguyen/Project/CodeReviewBot/src_bot/neo4jdb/neo4j_service.py", line 1133, in execute_queries_batch
+    raise e
+  File "/Users/manhnguyen/Project/CodeReviewBot/src_bot/neo4jdb/neo4j_service.py", line 1127, in execute_queries_batch
+    result = session.run(query, params)
+  File "/Users/manhnguyen/Project/CodeReviewBot/.venv/lib/python3.10/site-packages/neo4j/_sync/work/session.py", line 312, in run
+    self._auto_result._run(
+  File "/Users/manhnguyen/Project/CodeReviewBot/.venv/lib/python3.10/site-packages/neo4j/_sync/work/result.py", line 181, in _run
+    self._attach()
+  File "/Users/manhnguyen/Project/CodeReviewBot/.venv/lib/python3.10/site-packages/neo4j/_sync/work/result.py", line 292, in _attach
+    self._connection.fetch_message()
+  File "/Users/manhnguyen/Project/CodeReviewBot/.venv/lib/python3.10/site-packages/neo4j/_sync/io/_common.py", line 180, in inner
+    func(*args, **kwargs)
+  File "/Users/manhnguyen/Project/CodeReviewBot/.venv/lib/python3.10/site-packages/neo4j/_sync/io/_bolt.py", line 851, in fetch_message
+    res = self._process_message(tag, fields)
+  File "/Users/manhnguyen/Project/CodeReviewBot/.venv/lib/python3.10/site-packages/neo4j/_sync/io/_bolt5.py", line 376, in _process_message
+    response.on_failure(summary_metadata or {})
+  File "/Users/manhnguyen/Project/CodeReviewBot/.venv/lib/python3.10/site-packages/neo4j/_sync/io/_common.py", line 247, in on_failure
+    raise Neo4jError.hydrate(**metadata)
+neo4j.exceptions.ClientError: {code: Neo.ClientError.Procedure.ProcedureNotFound} {message: There is no procedure with the name `apoc.create.node` registered for this database instance. Please ensure you've spelled the procedure name correctly and that the procedure is properly deployed.}
+2026-01-06 18:47:36,416 - neo4j - ERROR - Failed to write data to connection IPv4Address(('localhost', 7687)) (ResolvedIPv4Address(('127.0.0.1', 7687)))
