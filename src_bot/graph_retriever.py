@@ -1,13 +1,12 @@
 import weaviate
 from typing import List
-from src_bot.neo4jdb.neo4j_db import Neo4jDB
+from src_bot.neo4jdb.neo4j_service import Neo4jService
 from src_bot.config.config import configs
 from sentence_transformers import SentenceTransformer
 
 class CustomGraphRAGRetriever:
     def __init__(self):
-        self.neo4j_db = Neo4jDB()
-        self.driver = self.neo4j_db.driver
+        self.neo4j_service = Neo4jService()
         self.model = SentenceTransformer(
             "microsoft/codebert-base",
             device= "cpu"
@@ -35,7 +34,7 @@ class CustomGraphRAGRetriever:
         """
     def close(self):
         """Đóng kết nối khi không dùng nữa"""
-        self.driver.close()
+        self.neo4j_service.db.driver.close()
         self.weaviate_client.close()
 
     def search(self, query_text: str, top_k: int = 3) -> List[str]:
@@ -62,36 +61,29 @@ class CustomGraphRAGRetriever:
             })
         
         final_context = []
-        with self.driver.session() as session:
-            for item in results:
-                ast_hash = item.get("ast_hash")
-                graph_data = session.run(self.cypher_query, weaviate_id=ast_hash).single()
-                #print(item)
-                #print(graph_data)
-                if graph_data:
-                     context_str = self._format_context(item, graph_data)
-                     final_context.append(context_str)
+        for item in results:
+            ast_hash = item.get("ast_hash")
+            graph_data = self.neo4j_service.get_node_by_ast_hash(ast_hash)
+            if graph_data:
+                related_nodes = self.neo4j_service.get_related_nodes([graph_data], max_level=7)
+                relationship_data = self.neo4j_service.extract_relationships(related_nodes)
+                context_str = self._format_context(relationship_data)
+                if context_str:
+                    final_context.append(context_str)
         
         return final_context
 
-    def _format_context(self, vector_data, graph_data) -> str:
-        node_type = graph_data["node_type"][0] if len(graph_data["node_type"]) else "Unknown"
-        name = graph_data["name"]
+    def _format_context(self, relationship_data) -> str:
+        if not relationship_data or len(relationship_data) == 0:
+            return None
         
-        description = f"\n--- FOUND CONTEXT: {node_type} '{name}' ---\n"
-        
-        if node_type == "EndpointNode":
-            description += f"Logic xử lý: {graph_data['triggers_endpoint']}\n"
-            description += f"Nội dung code đầy đủ:\n```\n{graph_data['code']}\n```\n"
-            
-        elif node_type == "MethodNode":
-            description += f"Được gọi bởi (Callers): {graph_data['called_by']}\n"
-            description += f"Gọi đến (Callees): {graph_data['calls_to']}\n"
-            description += f"Thuộc API (Triggered by): {graph_data['triggers_endpoint']}\n"
-            description += f"Nội dung code đầy đủ:\n```\n{graph_data['code']}\n```\n"
-            
-        elif node_type == "ClassNode":
-            description += f"Nội dung code đầy đủ:\n```\n{graph_data['code']}\n```\n"
-            
+        description = "Based on the code graph, here are some related code relationships:\n"
+        for rel in relationship_data:
+            description += f"- Relationship Type: {rel['relationship_type']}\n"
+            description += f"  From ({', '.join(rel['from_labels'])}):\n"
+            description += f"  ```\n{rel['from_content']}\n```\n"
+            description += f"  To ({', '.join(rel['to_labels'])}):\n"
+            description += f"  ```\n{rel['to_content']}\n```\n"
+
         return description
     

@@ -2,9 +2,8 @@
 .venv/
 __pycache__/
 policy.txt
-ingest_weaviate.py
-init_weaviate.py
 test_data_output.json
 git_test.py
 *test*
 src_bot/lsp/multilspy/language_servers/eclipse_jdtls/static/vscode-java/extension/jre/
+ingest_to_weaviate.py

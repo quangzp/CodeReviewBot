@@ -51,5 +51,5 @@ class Neo4jPathDto(BaseModel):
 
 class Neo4jTraversalResultDto(BaseModel):
     endpoint: Neo4jNodeDto
-    paths: List[Neo4jPathDto]
+    paths: Neo4jPathDto | Any
     visited_nodes: List[Neo4jNodeDto]
