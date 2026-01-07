@@ -31,8 +31,9 @@ class BotService:
             files = pr.get_files()
             code_files = [f for f in files if f.filename.endswith(('.py', '.js', '.java', '.cpp', '.ts', '.go', '.rb'))]
 
-            diff_response = requests.get(pr.diff_url, headers={"Authorization": f"token {self.github_token}", "Accept": "application/vnd.github.v3.diff"})
+            diff_response = requests.get(pr.url, headers={"Authorization": f"token {self.github_token}", "Accept": "application/vnd.github.v3.diff"})
             diff_content = diff_response.text
+            # print(diff_content)
             patch_set = PatchSet(diff_content)
 
             for f in code_files:

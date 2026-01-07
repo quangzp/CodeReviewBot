@@ -1617,6 +1617,7 @@ class Neo4jService:
                 logger.info(f"Removed {removed} duplicate relationships")
 
     def extract_relationships(
+            self,
         traversal_results: List[Neo4jTraversalResultDto]
     ):
         results = []
