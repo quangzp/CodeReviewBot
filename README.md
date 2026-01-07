@@ -1,6 +1,6 @@
-# GraphRAG Code Review Bot
+# GraphRAG và LLM cho Code Review Bot
 
-**Tự động hóa Code Review** bằng cách kết hợp **Code Property Graph (CPG)** và **Large Language Models (LLM)**.
+**Tự động hóa Code Review** bằng cách kết hợp **Retrieval-Augmented Generation using Graphs (GraphRag)** và **Large Language Models (LLM)**.
 
 ---
 
