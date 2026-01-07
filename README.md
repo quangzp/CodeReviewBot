@@ -17,7 +17,7 @@ Trong quy trình phát triển phần mềm hiện đại, việc **review code 
 **GraphRAG Code Review Bot** giải quyết bài toán này bằng kiến trúc  
 **Graph Retrieval-Augmented Generation (GraphRAG)**.
 
-Thay vì chỉ đọc code như **văn bản thuần túy**, hệ thống tiếp cận code như một **đồ thị liên kết chặt chẽ**, cho phép hiểu sâu cả *ngữ nghĩa* lẫn *cấu trúc*.
+Thay vì chỉ đọc code như **văn bản thuần túy**, hệ thống tiếp cận code như một **đồ thị liên kết chặt chẽ**, cho phép hiểu sâu cả _ngữ nghĩa_ lẫn _cấu trúc_.
 
 ---
 
@@ -26,14 +26,17 @@ Thay vì chỉ đọc code như **văn bản thuần túy**, hệ thống tiếp
 Hệ thống kết hợp sức mạnh của ba trụ cột chính:
 
 ### Ngữ nghĩa (Semantics)
+
 - Hiểu **ý định của đoạn code**
 - Thông qua **Vector Search** với **Weaviate**
 
 ### Cấu trúc (Structure)
+
 - Hiểu **luồng dữ liệu**, **quan hệ phụ thuộc**, **call graph**
 - Thông qua **Code Property Graph (CPG)** với **Neo4j**
 
 ### Suy luận (Reasoning)
+
 - Điều phối các bước phân tích phức tạp
 - Thông qua **LangGraph**
 
@@ -59,9 +62,9 @@ graph TD
         Parser -->|Analysis| Analyzer[Code Analyzer]
         Analyzer --> |Code Chunking| Chunker[Code Chunker]
         Chunker -->|2. Import Nodes / Edges| Neo4j[Neo4j Graph DB]
-        
+
         Chunker -->|4. Generate Vectors| EmbedModel[Embedding Model]
-        
+
         EmbedModel -.->|Semantic Vector| Weaviate[Weaviate Vector DB]
     end
 
@@ -69,13 +72,13 @@ graph TD
     subgraph Reasoning["Reasoning Engine (LangGraph)"]
         Agent[Agent]
         Retriever[Retriever]
-        
+
         GH -->|6. Fetch Diff| Agent
         Agent -->|7. Query Context| Retriever
-        
+
         Retriever <-->|Semantic Search| Weaviate
         Retriever <-->|Structural Traversal| Neo4j
-        
+
         Agent -->|8. Context + Diff| LLM[LLM]
         LLM -->|Review Comments| Agent
     end
@@ -105,22 +108,26 @@ pip install -r requirements.txt
 ```
 
 ### 3. Cấu hình biến môi trường
-Sử dụng file `.env` để khai báo các biến môi trường, xem ví dụ trong file `.env-example`
 
+Sử dụng file `.env` để khai báo các biến môi trường, xem ví dụ trong file `.env-example`
 
 ### 4. Cấu hình Neo4j và Weaviate database
 
 ```bash
-TODO
+python run_analyzer.py
+python migrate_weaviate.py
 ```
 
 ### 5. Chạy bot
+
 ```bash
 python run_server.py
 ```
 
 ### 6.Cài Đặt ngrok (Public IP) (Optional)
+
 Hiện tại bot đang chạy với cổng `localhost:8000`, chúng ta cần public cổng này để Github/Gitlab có thể truyền sự kiện pull request qua webhook.
+
 #### Bước 1: Cài đặt ngrok qua pip
 
 ```bash
@@ -135,4 +142,3 @@ Tham khảo cách tạo và lấy Ngrok token qua: (https://ngrok.com/)
 ngrok config add-authtoken YOUR_NGROK_TOKEN
 ngrok http 8000
 ```
-

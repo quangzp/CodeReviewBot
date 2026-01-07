@@ -3,7 +3,7 @@ from typing import List, Dict, Tuple, Optional
 from loguru import logger
 
 from src_bot.neo4jdb.neo4j_db import Neo4jDB
-from src_bot.neo4jdb.neo4j_dto import Neo4jNodeDto, Neo4jPathDto, Neo4jTraversalResultDto
+from src_bot.neo4jdb.neo4j_dto import Neo4jNodeDto, Neo4jPathDto, Neo4jTraversalResultDto,Neo4jRelationshipDto
 from src_bot.models.domain_models import CodeChunk, ChunkType
 
 
@@ -1392,7 +1392,7 @@ class Neo4jService:
             return [
                 Neo4jTraversalResultDto(
                     endpoint=_node_to_dto(record['endpoint']),
-                    path=_path_to_dto(record['path']),
+                    paths=_path_to_dto(record['path']),
                     visited_nodes=[_node_to_dto(node) for node in record['visited_nodes']]
                 )
                 for record in result
@@ -1615,3 +1615,51 @@ class Neo4jService:
             removed = record['removed_count'] if record else 0
             if removed > 0:
                 logger.info(f"Removed {removed} duplicate relationships")
+
+    def extract_relationships(
+        traversal_results: List[Neo4jTraversalResultDto]
+    ):
+        results = []
+        seen_relationships = set()
+
+        def node_key(node: Neo4jNodeDto):
+            return (
+                node.id
+                or node.ast_hash
+                or (node.class_name, node.method_name, node.file_path)
+            )
+
+        def rel_key(rel: Neo4jRelationshipDto):
+            return (
+                rel.type,
+                node_key(rel.start_node),
+                node_key(rel.end_node),
+            )
+
+        for traversal in traversal_results:
+            path = traversal.paths
+        if path and hasattr(path, "relationships"):
+            for rel in path.relationships:
+                rk = rel_key(rel)
+                if rk in seen_relationships:
+                    continue
+
+                seen_relationships.add(rk)
+                results.append({
+                    "type": "relationship",
+                    "relationship_type": rel.type,
+                    "from_labels": rel.start_node.labels,
+                    "to_labels": rel.end_node.labels,
+                    "from_content": rel.start_node.content,
+                    "to_content": rel.end_node.content,
+                })
+
+        return results
+
+    def get_node_by_ast_hash(self, ast_hash: str) -> Optional[Neo4jNodeDto]:
+        query = """
+        MATCH (n) WHERE n.ast_hash = $ast_hash RETURN n
+        """
+        with self.db.driver.session() as session:
+            result = session.run(query, {"ast_hash": ast_hash}).single()
+            return _node_to_dto(result["n"]) if result else None

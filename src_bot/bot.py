@@ -18,7 +18,7 @@ class GraphRAGBot:
     def initialize(self):
         self.retriever = CustomGraphRAGRetriever()
         self.llm = ChatOllama(
-            model="deepseek-coder:1.3b-instruct",
+            model="deepseek-r1:7b",
             temperature=0,     
         )
 
@@ -78,22 +78,27 @@ class GraphRAGBot:
 
     def review_node(self,state: CodeReviewState):
         print("--- STEP 3: GENERATING REVIEW ---")
-        system_prompt = """Bạn là Senior Code Reviewer & Security Auditor.
-        
-        Nhiệm vụ: Review đoạn code diff dựa trên NGỮ CẢNH HỆ THỐNG được cung cấp.
-        
-        NGỮ CẢNH HỆ THỐNG (Từ Knowledge Graph):
-        {graph_context}
-        
-        PULL REQUEST DIFF:
-        {pr_diff}
-        
-        HƯỚNG DẪN REVIEW:
-        1. **Endpoint & Security**: Nếu thay đổi liên quan đến Endpoint, hãy kiểm tra xem nó có gọi hàm xác thực (Auth) nào trong ngữ cảnh không?
-        2. **Configuration Impact**: Nếu thay đổi liên quan đến Configuration, hãy cảnh báo tất cả các hàm (Methods) đang sử dụng config đó.
-        3. **Logic Flow**: Kiểm tra các hàm gọi (Callers) để đảm bảo thay đổi không phá vỡ logic cũ.
-        
-        Hãy trả về định dạng Markdown, chia rõ các mục: [Tóm tắt], [Phân tích tác động], [Cảnh báo bảo mật], [Đề xuất].
+        system_prompt = """
+                    You are a Senior Code Reviewer & Security Auditor.
+
+                    Task: Review the code diff based on the provided SYSTEM CONTEXT.
+
+                    SYSTEM CONTEXT (From the Knowledge Graph):
+                    {graph_context}
+
+                    PULL REQUEST DIFF:
+                    {pr_diff}
+
+                    REVIEW GUIDELINES:
+
+                    Endpoint & Security: If the change involves an Endpoint, verify whether it calls any authentication (Auth) functions defined in the context.
+
+                    Configuration Impact: If the change involves Configuration, warn about all functions (Methods) that are using that configuration.
+
+                    Logic Flow: Check caller functions to ensure the change does not break existing logic.
+
+                    Return the result in Markdown format, clearly divided into the following sections:
+                    [Summary], [Impact Analysis], [Security Warnings], [Recommendations].
         """
         context_str = "\n".join(state["context_data"]) if len(state["context_data"]) > 0 else None
         content = None
