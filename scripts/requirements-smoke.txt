@@ -1,0 +1,7 @@
+# Smoke test deps for scripts/test_gpt_oss_swebench_lite_smoke.py
+# Prefer Python 3.10+ and upgrade pip first: python -m pip install --upgrade pip
+torch
+transformers
+accelerate
+datasets
+huggingface_hub

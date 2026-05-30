@@ -1,8 +1,16 @@
-from src_bot.neo4jdb.neo4j_db import Neo4jDB
-from src_bot.neo4jdb.neo4j_dto import Neo4jNodeDto,Neo4jTraversalResultDto,Neo4jPathDto,Neo4jRelationshipDto
-from typing import List,Optional
+from __future__ import annotations
 
-def _node_to_dto(node) -> Neo4jNodeDto:
+from src_bot.neo4jdb.neo4j_db import Neo4jDB
+from src_bot.neo4jdb.neo4j_dto import (
+    Neo4jNodeDto,
+    Neo4jTraversalResultDto,
+    Neo4jPathDto,
+    Neo4jRelationshipDto,
+)
+from typing import List, Optional
+
+
+def _node_to_dto(node) -> Optional[Neo4jNodeDto]:
     if not node:
         return None
 
@@ -11,8 +19,10 @@ def _node_to_dto(node) -> Neo4jNodeDto:
         id=node.id,
         labels=list(node.labels),
         properties=node_dict,
-        **node_dict
+        **node_dict,
     )
+
+
 def _path_to_dto(path) -> Optional[Neo4jPathDto]:
     if not path:
         return None
@@ -29,14 +39,16 @@ def _path_to_dto(path) -> Optional[Neo4jPathDto]:
 
         summary_item = _create_summary_item(i, rel, start_node, end_node)
         path_summary.append(summary_item)
+
     return Neo4jPathDto(
         start_node=nodes[0] if nodes else None,
         end_node=nodes[-1] if nodes else None,
         total_length=len(relationships),
         nodes=nodes,
         relationships=relationships,
-        path_summary=path_summary
+        path_summary=path_summary,
     )
+
 
 def _get_relationship_nodes(nodes, index):
     start_node = nodes[index] if index < len(nodes) else None
@@ -49,7 +61,7 @@ def _create_relationship_data(rel, start_node, end_node):
         "type": rel.type,
         "start_node": start_node,
         "end_node": end_node,
-        "properties": dict(rel)
+        "properties": dict(rel),
     }
 
 
@@ -58,7 +70,7 @@ def _create_summary_item(step_index, rel, start_node, end_node):
         "step": step_index + 1,
         "from": _create_node_summary(start_node) if start_node else None,
         "relationship": rel.type,
-        "to": _create_node_summary(end_node) if end_node else None
+        "to": _create_node_summary(end_node) if end_node else None,
     }
 
 
@@ -66,12 +78,14 @@ def _create_node_summary(node):
     return {
         "class_name": node.class_name if node else None,
         "method_name": node.method_name if node else None,
-        "node_type": node.labels[0] if node and node.labels else None
+        "node_type": node.labels[0] if node and node.labels else None,
     }
+
 
 class Neo4jService:
     def __init__(self, db: Neo4jDB | None = None):
         self.db = db or Neo4jDB()
+
     def get_node_by_ast_hash(self, ast_hash: str) -> Optional[Neo4jNodeDto]:
         query = """
         MATCH (n) WHERE n.ast_hash = $ast_hash RETURN n
@@ -79,14 +93,22 @@ class Neo4jService:
         with self.db.driver.session() as session:
             result = session.run(query, {"ast_hash": ast_hash}).single()
             return _node_to_dto(result["n"]) if result else None
-        
+
     def get_related_nodes(
-            self,
-            target_nodes: List[Neo4jNodeDto],
-            max_level: int = 20,
-            min_level: int = 1,
-            relationship_filter: str = "CALL>|<IMPLEMENT|<EXTEND|USE>|<BRANCH"
+        self,
+        target_nodes: List[Neo4jNodeDto],
+        max_level: int = 3,
+        min_level: int = 1,
+        relationship_filter: str = "CALL>|<IMPLEMENT|<EXTEND|USE>|<BRANCH",
+        max_results: int = 500,
     ) -> List[Neo4jTraversalResultDto]:
+        """
+        Traverse the code property graph from target nodes.
+
+        Uses bounded traversal to ensure scalability on large repos:
+        - max_level defaults to 3 (not 20) to avoid hop explosion
+        - max_results caps total returned paths
+        """
         query = """
         WITH $targets AS targets
         MATCH (endpoint)
@@ -100,7 +122,7 @@ class Neo4jService:
           )
         )
         CALL apoc.path.expandConfig(endpoint, {
-          relationshipFilter: "CALL>|<IMPLEMENT|<EXTEND|USE>|<BRANCH",
+          relationshipFilter: $relationship_filter,
           minLevel: $min_level,
           maxLevel: $max_level,
           bfs: true,
@@ -110,9 +132,9 @@ class Neo4jService:
         WITH endpoint, path,
              nodes(path) AS node_list,
              relationships(path) AS rel_list
-        WITH endpoint, path, node_list, rel_list, 
+        WITH endpoint, path, node_list, rel_list,
             [i IN range(0, size(rel_list) - 1) |
-            CASE 
+            CASE
                 WHEN type(rel_list[i]) = 'BRANCH'
                     AND node_list[i + 1].branch = 'develop'
                     AND node_list[i].branch = 'main'
@@ -139,29 +161,39 @@ class Neo4jService:
         RETURN endpoint, path,
                [node IN filtered_nodes WHERE node IS NOT NULL AND NOT node IN exclude_nodes] AS visited_nodes
         ORDER BY path
+        LIMIT $max_results
         """
 
         params = {
-            'targets': [node.model_dump() for node in target_nodes],
-            'relationship_filter': relationship_filter,
-            'min_level': min_level,
-            'max_level': max_level
+            "targets": [node.model_dump() for node in target_nodes],
+            "relationship_filter": relationship_filter,
+            "min_level": min_level,
+            "max_level": max_level,
+            "max_results": max_results,
         }
 
         with self.db.driver.session() as session:
             result = session.run(query, params)
             return [
                 Neo4jTraversalResultDto(
-                    endpoint=_node_to_dto(record['endpoint']),
-                    paths=_path_to_dto(record['path']),
-                    visited_nodes=[_node_to_dto(node) for node in record['visited_nodes']]
+                    endpoint=_node_to_dto(record["endpoint"]),
+                    paths=_path_to_dto(record["path"]),
+                    visited_nodes=[
+                        _node_to_dto(node) for node in record["visited_nodes"]
+                    ],
                 )
                 for record in result
             ]
-    
+
     def extract_relationships(
-        traversal_results: List[Neo4jTraversalResultDto]
-    ):
+        self, traversal_results: List[Neo4jTraversalResultDto]
+    ) -> List[dict]:
+        """
+        Extract unique relationships from traversal results.
+
+        Bug fix: added `self` parameter (was missing) and fixed indentation
+        so the inner `if` block runs inside the `for` loop, not after it.
+        """
         results = []
         seen_relationships = set()
 
@@ -172,29 +204,29 @@ class Neo4jService:
                 or (node.class_name, node.method_name, node.file_path)
             )
 
-        def rel_key(rel: Neo4jRelationshipDto):
+        def rel_key(rel):
             return (
-                rel.type,
-                node_key(rel.start_node),
-                node_key(rel.end_node),
+                rel["type"],
+                node_key(rel["start_node"]),
+                node_key(rel["end_node"]),
             )
 
         for traversal in traversal_results:
             path = traversal.paths
-        if path and hasattr(path, "relationships"):
-            for rel in path.relationships:
-                rk = rel_key(rel)
-                if rk in seen_relationships:
-                    continue
+            if path and hasattr(path, "relationships"):
+                for rel in path.relationships:
+                    rk = rel_key(rel)
+                    if rk in seen_relationships:
+                        continue
 
-                seen_relationships.add(rk)
-                results.append({
-                    "type": "relationship",
-                    "relationship_type": rel.type,
-                    "from_labels": rel.start_node.labels,
-                    "to_labels": rel.end_node.labels,
-                    "from_content": rel.start_node.content,
-                    "to_content": rel.end_node.content,
-                })
+                    seen_relationships.add(rk)
+                    results.append({
+                        "type": "relationship",
+                        "relationship_type": rel["type"],
+                        "from_labels": rel["start_node"].labels,
+                        "to_labels": rel["end_node"].labels,
+                        "from_content": rel["start_node"].content,
+                        "to_content": rel["end_node"].content,
+                    })
 
         return results

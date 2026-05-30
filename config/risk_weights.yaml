@@ -1,0 +1,20 @@
+# Risk scoring weights — based on CHID paper (Springer 2025)
+# Adjust normalization caps per repo size
+
+risk_weights:
+  blast_radius: 0.20
+  coverage_gap: 0.25
+  bug_frequency: 0.15
+  contributor_churn: 0.15
+  new_contributor: 0.15
+  pr_size: 0.10
+
+normalization:
+  max_blast_radius: 20
+  max_bug_frequency: 10
+  max_contributor_churn: 10
+  max_pr_size_lines: 500
+
+thresholds:
+  low: 0.30    # < low  -> auto-approve
+  high: 0.55   # > high -> request changes

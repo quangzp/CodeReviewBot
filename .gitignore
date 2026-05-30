@@ -6,3 +6,21 @@ test_data_output.json
 git_test.py
 *test*
 ingest_to_weaviate.py
+
+# Project clones (git repos cloned at runtime — large, not source code)
+data/projects/
+
+# SQLite runtime database (contains user review data)
+data/reviews.db
+
+# SWE-bench prediction output files (generated artifacts)
+predictions*.jsonl
+
+# Frontend build artifacts and dependencies
+frontend/node_modules/
+frontend/dist/
+
+# Python build artifacts
+*.egg-info/
+dist/
+build/

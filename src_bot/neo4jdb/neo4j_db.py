@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from neo4j import GraphDatabase
 from src_bot.config.config import configs
 
