@@ -26,6 +26,7 @@ from api.database import (
 from api.project_indexer import index_project, parse_repo_url
 from api.reviewer import run_pr_review, parse_pr_url
 from api.agent.fix_bug import fix_bug_in_project
+from api.agent.refactor import refactor_code_in_project
 
 
 # ============================================================================
@@ -117,6 +118,39 @@ TOOL_DESCRIPTIONS = [
                 },
             },
             "required": ["repo_name", "bug_description"],
+        },
+    },
+    {
+        "name": "refactor_code",
+        "description": (
+            "Refactor code in a project: improve structure, reduce duplication, extract methods, "
+            "add type hints, or improve readability — WITHOUT changing behavior. "
+            "Use when the user wants to clean up or improve code quality, not fix a bug."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_name": {
+                    "type": "string",
+                    "description": "Repo in 'owner/name' form. The project must be already indexed.",
+                },
+                "refactor_description": {
+                    "type": "string",
+                    "description": (
+                        "Natural-language description of what to refactor and how. "
+                        "Example: 'Extract the URL-building logic in kibana_discover.py into a helper function'"
+                    ),
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": (
+                        "Optional. Target file path relative to repo root "
+                        "(e.g. 'elastalert/kibana_discover.py'). "
+                        "If omitted, the bot will locate the relevant file automatically."
+                    ),
+                },
+            },
+            "required": ["repo_name", "refactor_description"],
         },
     },
     {
@@ -332,6 +366,27 @@ async def tool_fix_bug(repo_name: str, bug_description: str, **kwargs) -> dict:
     return result
 
 
+async def tool_refactor_code(repo_name: str, refactor_description: str, file_path: str = "", **kwargs) -> dict:
+    """Refactor code in a project without a PR."""
+    project = await get_project_by_repo_name(repo_name)
+    if not project:
+        return {
+            "summary": f"Project '{repo_name}' is not onboarded.",
+            "render": {
+                "kind": "error",
+                "message": f"'{repo_name}' is not onboarded. Add it first.",
+            },
+        }
+    if project.status != "indexed":
+        return {
+            "summary": f"Project '{repo_name}' is not ready (status: {project.status}).",
+            "render": {"kind": "error", "message": f"Project status is {project.status}."},
+        }
+
+    result = await refactor_code_in_project(project, refactor_description, file_path)
+    return result
+
+
 async def tool_recent_reviews(repo_name: str = "", limit: int = 10, **kwargs) -> dict:
     """List recent reviews."""
     project_id = None
@@ -373,5 +428,6 @@ def build_tool_registry() -> dict[str, Callable[..., Awaitable[dict]]]:
         "project_status": tool_project_status,
         "review_pr": tool_review_pr,
         "fix_bug": tool_fix_bug,
+        "refactor_code": tool_refactor_code,
         "recent_reviews": tool_recent_reviews,
     }

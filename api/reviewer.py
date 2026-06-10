@@ -273,6 +273,12 @@ async def run_pr_review(
             })
             issue_text = user_request_text
 
+        # Inject project summary into issue_text for Planner context
+        _summary_file = get_project_dir(project.id) / "PROJECT_SUMMARY.txt"
+        if _summary_file.exists():
+            _proj_ctx = _summary_file.read_text(encoding="utf-8")
+            issue_text = f"[Repository context]\n{_proj_ctx}\n---\n{issue_text}"
+
         # ----------------------------------------------------------------
         # 5. Per-file review (queries existing graph only)
         # ----------------------------------------------------------------
@@ -320,11 +326,41 @@ async def run_pr_review(
                     file_reviews.append(file_result)
                     continue
 
-                # Graph context for Reflexion
-                graph_context = _get_graph_context_for_file(session, actual_file, project_id)
+                # ── Harness: Risk Scoring (CHID) + Content Escalation + Context Budget ──
+                try:
+                    from src_bot.risk.scorer import RiskScorer, RiskInput
+                    _risk_result = RiskScorer().score(RiskInput(
+                        blast_radius_size=len(changed_files),
+                        pr_size_lines=getattr(changed_file, "changes", 0),
+                    ))
+                    file_result.risk_level = _risk_result.level
+                except Exception:
+                    pass
+
+                # Content-based escalation: security-sensitive files → always high
+                _SECURITY_PATTERNS = {
+                    "auth", "password", "token", "secret", "encrypt",
+                    "permission", "role", "admin", "credential", "oauth",
+                    "jwt", "session", "csrf", "injection", "sql",
+                }
+                if any(p in actual_file.lower() for p in _SECURITY_PATTERNS):
+                    file_result.risk_level = "high"
+
+                # Map risk level → context depth + retry budget
+                _RISK_TOP_K = {"low": 10, "medium": 15, "high": 25}
+                _RISK_RETRIES = {"low": 2, "medium": 3, "high": 5}
+                _top_k = _RISK_TOP_K.get(file_result.risk_level, 15)
+                max_retries = _RISK_RETRIES.get(
+                    file_result.risk_level, configs.REFLEXION_MAX_RETRIES
+                )
+                # ── End Risk Scoring ─────────────────────────────────────────────
+
+                # Graph context for Reflexion (depth scales with risk)
+                graph_context = _get_graph_context_for_file(
+                    session, actual_file, project_id, top_k=_top_k
+                )
 
                 # Phase 3: patch generation + Reflexion loop
-                max_retries = configs.REFLEXION_MAX_RETRIES
                 reflections: list[str] = []
                 last_patch = ""
                 last_error = ""
@@ -390,7 +426,12 @@ async def run_pr_review(
                         if eval_score < 3 and attempt < max_retries:
                             # Evaluator rejected — treat like a failed attempt
                             last_patch = patch
-                            last_error = f"Evaluator feedback (score {eval_score}/5): {eval_reason}"
+                            last_error = (
+                                f"[EVALUATOR REJECTION score={eval_score}/5]\n"
+                                f"{eval_reason}\n\n"
+                                f"The patch applied cleanly but failed quality review. "
+                                f"Focus on improving logic, not syntax."
+                            )
                             await emit("phase", {
                                 "phase": 3, "file": file_path,
                                 "attempt": attempt, "status": "evaluator_rejected",
@@ -402,6 +443,8 @@ async def run_pr_review(
                         file_result.patch = patch
                         file_result.applies_cleanly = True
                         file_result.reflexion_attempts = attempt
+                        file_result.eval_score = eval_score
+                        file_result.eval_reason = eval_reason
                         patches_generated += 1
                         await emit("phase", {
                             "phase": 3, "file": file_path,
@@ -428,6 +471,29 @@ async def run_pr_review(
                         })
 
                 file_reviews.append(file_result)
+
+        # ── Harness: Friction Summary SSE (repo-harness TRACE_SPEC) ──────────
+        _scores = [fr.eval_score for fr in file_reviews if fr.eval_score is not None]
+        _friction = []
+        for _fr in file_reviews:
+            if _fr.eval_score is not None and _fr.eval_score < 3:
+                _friction.append(
+                    f"{_fr.file_path}: quality={_fr.eval_score}/5 ({_fr.eval_reason[:80]})"
+                )
+            if _fr.reflexion_attempts > 2:
+                _friction.append(
+                    f"{_fr.file_path}: needed {_fr.reflexion_attempts} reflexion attempts"
+                )
+            if not _fr.applies_cleanly and _fr.patch:
+                _friction.append(f"{_fr.file_path}: patch never applied cleanly")
+        await emit("friction_summary", {
+            "files_reviewed": len(file_reviews),
+            "patches_generated": patches_generated,
+            "avg_eval_score": round(sum(_scores) / len(_scores), 2) if _scores else None,
+            "friction": _friction,
+            "quality": "good" if not _friction else "needs_attention",
+        })
+        # ── End Friction Summary ────────────────────────────────────────────
 
         # ----------------------------------------------------------------
         # 6. MEMORY WRITE — learn from this review

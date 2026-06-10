@@ -131,6 +131,77 @@ Based on the issue description and code search results, which single file needs 
 Return ONLY the file path, nothing else. Example: django/forms/widgets.py"""
 
 
+# Module-level CodeBERT encoder — lazy-loaded once per process (~500MB)
+_weaviate_encoder = None
+
+
+def _get_weaviate_encoder():
+    global _weaviate_encoder
+    if _weaviate_encoder is None:
+        from sentence_transformers import SentenceTransformer
+        _weaviate_encoder = SentenceTransformer(
+            "microsoft/codebert-base", device="cpu"
+        )
+    return _weaviate_encoder
+
+
+def _weaviate_semantic_search(query_text: str, repo_dir: Path, top_k: int = 10) -> list:
+    """
+    Semantic search via Weaviate, post-filtered to this repo only.
+    Returns [{file_path, name, node_type}] or [] if Weaviate is unavailable.
+    """
+    try:
+        import weaviate, os
+        coll_name = os.getenv("WEAVIATE_COLLECTION_NAME", "")
+        if not coll_name:
+            return []
+
+        encoder = _get_weaviate_encoder()
+        query_vec = encoder.encode(query_text[:500], normalize_embeddings=True).tolist()
+
+        client = weaviate.connect_to_local()
+        col = client.collections.get(coll_name)
+        response = col.query.hybrid(
+            query=query_text[:500],
+            vector=query_vec,
+            alpha=0.5,
+            limit=top_k * 3,  # over-fetch before repo filter
+            return_properties=["name", "file_path", "node_type"],
+        )
+        client.close()
+
+        results, seen = [], set()
+        for obj in response.objects:
+            fp = obj.properties.get("file_path", "")
+            if fp and fp not in seen and (repo_dir / fp).exists():
+                seen.add(fp)
+                results.append({
+                    "file_path": fp,
+                    "name": obj.properties.get("name", ""),
+                    "node_type": obj.properties.get("node_type", ""),
+                })
+            if len(results) >= top_k:
+                break
+        return results
+    except Exception as e:
+        print(f"  [weaviate] Semantic search failed: {e}")
+        return []
+
+
+_LOW_VALUE_PATTERNS = frozenset({
+    "test_", "_test.", "/test/", "/tests/", "/__tests__/",
+    "spec_", "_spec.", "/spec/", "/specs/",
+    "mock_", "_mock.", "/mocks/", "/fixtures/",
+    "conftest.py", "/migrations/", "migrations/", "__tests__/",
+})
+
+
+def _is_low_value_file(file_path: str) -> bool:
+    """Return True for test/mock/spec/migration files (codegraph isLowValueFile pattern)."""
+    p = file_path.lower()
+    return any(pat in p for pat in _LOW_VALUE_PATTERNS)
+
+
 def phase1_localize_file(
     llm,
     issue_text: str,
@@ -143,6 +214,8 @@ def phase1_localize_file(
 
     # BM25 search for candidate files
     seeds = bm25_search(neo4j_session, issue_text[:1000], project_id, top_k=20)
+    # Deprioritize test/mock/spec files — preserve BM25 score order within each group
+    seeds.sort(key=lambda s: _is_low_value_file(s.get("file_path", "")))
     candidate_files = []
     seen_files = set()
     for s in seeds:
@@ -150,6 +223,15 @@ def phase1_localize_file(
         if fp and fp not in seen_files:
             seen_files.add(fp)
             candidate_files.append(f"  - {fp} ({s.get('type','')}: {s.get('name','')})")
+
+    # Weaviate semantic search — supplements BM25 with vector similarity
+    for hit in _weaviate_semantic_search(issue_text, repo_dir, top_k=10):
+        fp = hit["file_path"]
+        if fp not in seen_files:
+            seen_files.add(fp)
+            candidate_files.append(
+                f"  - {fp} (semantic: {hit.get('name','')} [{hit.get('node_type','')}])"
+            )
 
     # Get repo file tree (source files only, skip tests)
     file_tree = []
@@ -401,6 +483,98 @@ Respond ONLY with a ```diff ... ``` block. No explanation.
 """
 
 
+REFACTOR_PROMPT = """You are a senior Python developer performing a code refactoring.
+
+## Refactoring Request:
+{refactor_description}
+
+## File: {file_path}
+
+## Source Code:
+```python
+{file_content}
+```
+
+Generate a MINIMAL unified diff to refactor this code.
+Rules:
+- Preserve ALL existing behavior — no semantic changes whatsoever
+- Address only what is described in the refactoring request
+- The file path MUST be exactly: {file_path}
+- Include the full diff header (--- a/... +++ b/...)
+- Include correct @@ line numbers
+- Include 3 lines of context around each change
+
+Respond ONLY with a ```diff ... ``` block. No explanation."""
+
+REFACTOR_RETRY_PROMPT = """You are a senior Python developer. Your previous refactoring patch FAILED — read the reflection carefully and generate a corrected version.
+
+## Refactoring Request:
+{refactor_description}
+
+## File to modify: {file_path}
+
+## Your Previous Patch (FAILED):
+```diff
+{failed_patch}
+```
+
+## Self-Reflection (why it failed and what to fix):
+{reflection}
+
+## Source Code:
+```python
+{file_content}
+```
+
+Generate a corrected MINIMAL unified diff. Address the specific issues identified in the reflection.
+Rules:
+- Preserve ALL existing behavior
+- The file path MUST be exactly: {file_path}
+- Include the full diff header (--- a/... +++ b/...)
+- Include correct @@ line numbers with 3 lines of context
+
+Respond ONLY with a ```diff ... ``` block. No explanation."""
+
+
+def phase3_refactor_patch(
+    llm,
+    refactor_description: str,
+    file_path: str,
+    file_content: str,
+    reflection: str = "",
+    failed_patch: str = "",
+) -> str:
+    """Generate a refactoring patch. Accepts optional reflection for retry attempts."""
+    lines = file_content.split("\n")
+    numbered_lines = [f"{i+1:4d} | {l}" for i, l in enumerate(lines)]
+    content_for_prompt = "\n".join(numbered_lines)
+    if len(content_for_prompt) > 10000:
+        content_for_prompt = content_for_prompt[:10000] + "\n ... (truncated)"
+
+    if reflection and failed_patch:
+        prompt = REFACTOR_RETRY_PROMPT.format(
+            refactor_description=refactor_description[:2000],
+            file_path=file_path,
+            failed_patch=failed_patch[:2000],
+            reflection=reflection[:1000],
+            file_content=content_for_prompt,
+        )
+    else:
+        prompt = REFACTOR_PROMPT.format(
+            refactor_description=refactor_description[:2000],
+            file_path=file_path,
+            file_content=content_for_prompt,
+        )
+
+    try:
+        response = llm.invoke(prompt)
+        patch = _extract_and_clean_diff(response.content, file_path)
+        return patch
+    except Exception as e:
+        print(f"    Refactor phase 3 error: {e}")
+        return ""
+
+
 def phase3_generate_patch(
     llm,
     issue_text: str,
@@ -476,6 +650,27 @@ def _extract_and_clean_diff(text: str, expected_file: str) -> str:
 
     if not diff:
         return ""
+
+    # Strip line-number prefixes: LLMs sometimes keep "   17 | content" or "+ 20 | content"
+    # from the numbered source format (e.g. "   4 | def foo():").
+    # Detect by checking if a majority of hunk lines match the pattern.
+    _NUM_PREFIX = re.compile(r'^([+ -]?)\s*\d+\s*\|[ \t]?(.*)', re.DOTALL)
+    _raw_lines = diff.split("\n")
+    hunk_lines = [l for l in _raw_lines if l and l[0] in ' +-' and not l.startswith(('---', '+++'))]
+    numbered_count = sum(1 for l in hunk_lines if _NUM_PREFIX.match(l))
+    if hunk_lines and numbered_count / len(hunk_lines) > 0.4:
+        stripped = []
+        for l in _raw_lines:
+            if l.startswith(('---', '+++', '@@', 'diff', 'index')):
+                stripped.append(l)
+            else:
+                m = _NUM_PREFIX.match(l)
+                if m:
+                    marker = m.group(1) or ' '
+                    stripped.append(marker + m.group(2))
+                else:
+                    stripped.append(l)
+        diff = "\n".join(stripped)
 
     # Post-processing: fix common issues
     lines = diff.split("\n")
@@ -673,9 +868,12 @@ def _verify_patch_applies(patch: str, repo_dir: Path) -> tuple[bool, str]:
         Path(patch_file).unlink(missing_ok=True)
 
 
-def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str) -> str:
+def _get_graph_context_for_file(
+    neo4j_session, file_path: str, project_id: str, top_k: int = 15
+) -> str:
     """Get a concise graph context string for the reflector."""
     try:
+        # Node-level caller/callee context
         results = neo4j_session.run("""
             MATCH (n:CodeNode {file_path: $fp, project_id: $pid})
             OPTIONAL MATCH (caller:CodeNode {project_id: $pid})-[:CALLS]->(n)
@@ -683,8 +881,8 @@ def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str) 
             RETURN n.name AS name, n.type AS type, n.lineno AS lineno,
                    collect(DISTINCT caller.name) AS called_by,
                    collect(DISTINCT callee.name) AS calls
-            LIMIT 15
-        """, fp=file_path, pid=project_id)
+            LIMIT $top_k
+        """, fp=file_path, pid=project_id, top_k=top_k)
         parts = []
         for r in results:
             line = f"  {r['type']}: {r['name']} (line {r['lineno']})"
@@ -693,7 +891,44 @@ def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str) 
             if r["calls"]:
                 line += f" → calls: {', '.join(r['calls'][:4])}"
             parts.append(line)
-        return "\n".join(parts) if parts else "No graph data available."
+
+        # ── Harness: Blast radius (codegraph getImpactRadius pattern) ───────
+        # Show which OTHER files call into this file (up to 2 hops).
+        # Helps LLM avoid breaking callers when modifying interfaces.
+        blast_header = ""
+        try:
+            impact = neo4j_session.run("""
+                MATCH (n:CodeNode {file_path: $fp, project_id: $pid})
+                MATCH (direct:CodeNode {project_id: $pid})-[:CALLS]->(n)
+                WHERE direct.file_path <> $fp
+                OPTIONAL MATCH (indirect:CodeNode {project_id: $pid})-[:CALLS]->(direct)
+                WHERE indirect.file_path <> $fp
+                  AND indirect.file_path <> direct.file_path
+                RETURN DISTINCT direct.file_path AS direct_file,
+                       collect(DISTINCT indirect.file_path)[0..3] AS indirect_files
+                LIMIT 10
+            """, fp=file_path, pid=project_id)
+            direct_files, indirect_files = set(), set()
+            for row in impact:
+                if row["direct_file"]:
+                    direct_files.add(row["direct_file"])
+                for f in (row["indirect_files"] or []):
+                    if f:
+                        indirect_files.add(f)
+            indirect_files -= direct_files  # don't repeat
+            if direct_files or indirect_files:
+                blast_lines = ["Blast radius (files that call into this file):"]
+                if direct_files:
+                    blast_lines.append(f"  Direct: {', '.join(sorted(direct_files)[:5])}")
+                if indirect_files:
+                    blast_lines.append(f"  Indirect: {', '.join(sorted(indirect_files)[:3])}")
+                blast_header = "\n".join(blast_lines) + "\n"
+        except Exception:
+            pass
+        # ── End Blast radius ─────────────────────────────────────────────────
+
+        body = "\n".join(parts) if parts else "No graph data available."
+        return blast_header + body
     except Exception:
         return "Graph unavailable."
 

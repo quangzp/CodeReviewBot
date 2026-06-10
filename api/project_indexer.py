@@ -212,6 +212,19 @@ async def index_project(
                    edge_count=record.edge_count,
                    file_count=record.file_count)
 
+        # Write project summary for Planner context injection
+        def _write_summary():
+            summary_path = repo_dir / "PROJECT_SUMMARY.txt"
+            summary_path.write_text(
+                f"Repository: {record.repo_name}\n"
+                f"Language: Python\n"
+                f"Files: {record.file_count} Python source files\n"
+                f"Knowledge graph: {record.node_count} nodes, {record.edge_count} edges\n"
+                f"Indexed: {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n",
+                encoding="utf-8",
+            )
+        await loop.run_in_executor(None, _write_summary)
+
         # --------------------------------------------------------------
         # Phase 4: Mark as indexed
         # --------------------------------------------------------------

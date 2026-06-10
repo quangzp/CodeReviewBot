@@ -36,10 +36,32 @@ Score the patch:
 Reply with ONLY this JSON (no explanation):
 {"score": <1-5>, "reason": "<one sentence>"}"""
 
+REFACTOR_EVALUATOR_PROMPT = """You are a code refactoring quality evaluator. A developer wrote a patch to refactor code.
+Your job is to score this patch from 1 to 5.
 
-def evaluate_patch(bug_description: str, patch: str) -> tuple[int, str]:
+REFACTORING REQUEST:
+REPLACE_BUG
+
+PATCH:
+REPLACE_PATCH
+
+Score the patch:
+5 = Preserves ALL behavior, clearly improves readability/structure as requested, minimal change
+4 = Good refactoring with minor style issues or slightly over-engineered
+3 = Partially addresses the request, misses some scope or has minor logic drift
+2 = Changes behavior unexpectedly, or doesn't address the refactoring request
+1 = Breaks functionality or is completely unrelated to the request
+
+Reply with ONLY this JSON (no explanation):
+{"score": <1-5>, "reason": "<one sentence>"}"""
+
+
+def evaluate_patch(bug_description: str, patch: str, mode: str = "bug_fix") -> tuple[int, str]:
     """
     Evaluate patch quality using a fast LLM.
+
+    Args:
+        mode: "bug_fix" (default) or "refactor" — selects the scoring rubric.
 
     Returns (score 1-5, reason).
     score >= 3 = acceptable, < 3 = reject and retry.
@@ -50,8 +72,9 @@ def evaluate_patch(bug_description: str, patch: str) -> tuple[int, str]:
 
     try:
         client = Groq(api_key=configs.GROQ_API_KEY)
+        template = REFACTOR_EVALUATOR_PROMPT if mode == "refactor" else EVALUATOR_PROMPT
         prompt = (
-            EVALUATOR_PROMPT
+            template
             .replace("REPLACE_BUG", bug_description[:500])
             .replace("REPLACE_PATCH", patch[:1500])
         )

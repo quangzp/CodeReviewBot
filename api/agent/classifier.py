@@ -31,11 +31,12 @@ The bot has EXACTLY these capabilities:
 1. Add / onboard a GitHub project (user provides a GitHub URL or repo name)
 2. Review a pull request (user provides a PR URL or PR number + repo)
 3. Fix a bug in a project (user describes a bug + repo name)
-4. List projects, check project status, reindex a project
-5. Show recent reviews or check review status
+4. Refactor code in a project (user asks to improve, clean up, restructure, or refactor code)
+5. List projects, check project status, reindex a project
+6. Show recent reviews or check review status
 
 Classify the user message into ONE of:
-- IN_SCOPE   : clearly relates to one of the 5 capabilities above
+- IN_SCOPE   : clearly relates to one of the 6 capabilities above
 - OUT_SCOPE  : general programming questions, explanations, small talk, anything else
 - CLARIFY    : relates to the capabilities but is missing required info
 
@@ -45,16 +46,20 @@ Reply with ONLY a JSON object, nothing else:
 - Needs clarification: {"intent": "CLARIFY", "missing": "what info is needed"}
 
 Examples:
-"Add github.com/django/django"             -> IN_SCOPE
-"Review PR https://github.com/x/y/pull/1" -> IN_SCOPE
-"Fix the null pointer bug in elastalert2"  -> IN_SCOPE
-"What projects do I have?"                -> IN_SCOPE
-"Reindex elastalert2"                     -> IN_SCOPE
-"What is GraphRAG?"                       -> OUT_SCOPE
-"How do I write a binary search?"         -> OUT_SCOPE
-"Tell me a joke"                          -> OUT_SCOPE
-"Fix the bug"                             -> CLARIFY (missing: repo name and bug description)
-"Review the PR"                           -> CLARIFY (missing: PR URL or PR number and repo name)
+"Add github.com/django/django"                          -> IN_SCOPE
+"Review PR https://github.com/x/y/pull/1"              -> IN_SCOPE
+"Fix the null pointer bug in elastalert2"               -> IN_SCOPE
+"Refactor kibana_discover.py in elastalert-jertel"      -> IN_SCOPE
+"Clean up the auth module in my project"               -> IN_SCOPE
+"Improve code quality in nicholasgibson2/elastalert"   -> IN_SCOPE
+"What projects do I have?"                             -> IN_SCOPE
+"Reindex elastalert2"                                  -> IN_SCOPE
+"What is GraphRAG?"                                    -> OUT_SCOPE
+"How do I write a binary search?"                      -> OUT_SCOPE
+"Tell me a joke"                                       -> OUT_SCOPE
+"Fix the bug"                              -> CLARIFY (missing: repo name and bug description)
+"Review the PR"                            -> CLARIFY (missing: PR URL or PR number and repo name)
+"Refactor the code"                        -> CLARIFY (missing: repo name and what to refactor)
 
 User message: REPLACE_MESSAGE"""
 
@@ -64,6 +69,7 @@ OUT_SCOPE_REPLY = (
     "- **Adding** a GitHub project\n"
     "- **Reviewing** a pull request\n"
     "- **Fixing** a bug in an indexed project\n"
+    "- **Refactoring** code in an indexed project\n"
     "- **Checking** project or review status\n\n"
     "What would you like to do?"
 )

@@ -364,8 +364,24 @@ def graph_expand_simple(
     return [dict(r) for r in results]
 
 
+def _stem_variants(word: str) -> list:
+    """Return word + likely stem variants for Lucene OR expansion (codegraph pattern)."""
+    w = word.lower()
+    variants = [word]
+    if w.endswith("ing") and len(w) > 5:
+        variants.append(w[:-3])        # "caching" → "cach"
+        variants.append(w[:-3] + "e")  # "caching" → "cache"
+    elif w.endswith("tion") and len(w) > 6:
+        variants.append(w[:-4])        # "authentication" → "authenticat"
+    elif w.endswith("ed") and len(w) > 4:
+        variants.append(w[:-2])        # "authenticated" → "authenticat"
+    elif w.endswith("s") and len(w) > 4 and not w.endswith("ss"):
+        variants.append(w[:-1])        # "tokens" → "token"
+    return list(dict.fromkeys(variants))  # deduplicate, preserve order
+
+
 def _sanitize_lucene(query: str) -> str:
-    """Escape special Lucene characters and extract key terms."""
+    """Escape special Lucene characters and extract key terms with stem expansion."""
     import re
     # Extract meaningful words (3+ chars, alphanumeric/underscore)
     words = re.findall(r'\b\w{3,}\b', query)
@@ -382,7 +398,15 @@ def _sanitize_lucene(query: str) -> str:
             result.append(w)
         if len(result) >= 10:
             break
-    return " ".join(result) if result else "code"
+    # Expand each term with stem variants (OR groups) for better recall
+    expanded = []
+    for w in result:
+        variants = _stem_variants(w)
+        if len(variants) > 1:
+            expanded.append(f"({' OR '.join(variants)})")
+        else:
+            expanded.append(w)
+    return " ".join(expanded) if expanded else "code"
 
 
 # ---------------------------------------------------------------------------

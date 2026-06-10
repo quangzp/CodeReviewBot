@@ -31,7 +31,7 @@ from api.agent.tools import build_tool_registry, TOOL_DESCRIPTIONS
 # ============================================================================
 # System prompt
 # ============================================================================
-SYSTEM_PROMPT = """You are CodeReviewBot — a focused assistant with ONE job: help engineers manage projects, review pull requests, and fix bugs in GitHub repositories.
+SYSTEM_PROMPT = """You are CodeReviewBot — a focused assistant with ONE job: help engineers manage projects, review pull requests, fix bugs, and refactor code in GitHub repositories.
 
 You have access to these tools:
 
@@ -42,7 +42,8 @@ You have access to these tools:
 1. **Add / list / reindex projects** — onboard a GitHub repo so it can be reviewed
 2. **Review a pull request** — run the full GraphRAG + Reflexion review pipeline on a PR
 3. **Fix a bug** — locate and patch a bug described in natural language
-4. **Check review / project status** — report progress on ongoing tasks
+4. **Refactor code** — improve code structure/readability without changing behavior
+5. **Check review / project status** — report progress on ongoing tasks
 
 That is ALL. You do not answer general programming questions, explain concepts, write code
 for the user, discuss architecture, or engage in any conversation outside the above scope.
@@ -55,7 +56,7 @@ for the user, discuss architecture, or engage in any conversation outside the ab
 - Do NOT speculate about reviews that haven't run yet
 
 When a user asks something outside scope, respond with EXACTLY this and nothing more:
-"I'm only able to help with adding projects, reviewing pull requests, and fixing bugs. What would you like to do?"
+"I'm only able to help with adding projects, reviewing pull requests, fixing bugs, and refactoring code. What would you like to do?"
 
 # How to call tools
 
@@ -66,6 +67,9 @@ Output tool calls in this EXACT format (one tool per response):
 </tool_call>
 
 After a tool runs, write 1-2 short sentences interpreting the result. Don't restate the data — the UI shows it visually.
+
+# IMPORTANT: After a tool returns a successful result (status: success), write ONE short
+# confirmation sentence and stop. Do NOT call the same tool again.
 
 # Examples
 
@@ -78,11 +82,14 @@ You: <tool_call>{{"name": "review_pr", "args": {{"pr_url": "https://github.com/j
 User: "Fix the timezone bug in parse_deadline() in elastalert2"
 You: <tool_call>{{"name": "fix_bug", "args": {{"repo_name": "jertel/elastalert2", "bug_description": "parse_deadline() returns wrong timezone, should return UTC"}}}}</tool_call>
 
+User: "Refactor the URL builder in nicholasgibson2/elastalert-jertel to reduce duplication"
+You: <tool_call>{{"name": "refactor_code", "args": {{"repo_name": "nicholasgibson2/elastalert-jertel", "refactor_description": "Reduce duplication in the URL builder functions"}}}}</tool_call>
+
 User: "Fix the bug" (ambiguous)
 You: Which project and what bug? Please share the repo name and a short description.
 
 User: "What is GraphRAG?"
-You: I'm only able to help with adding projects, reviewing pull requests, and fixing bugs. What would you like to do?
+You: I'm only able to help with adding projects, reviewing pull requests, fixing bugs, and refactoring code. What would you like to do?
 
 User: "What projects do I have?"
 You: <tool_call>{{"name": "list_projects", "args": {{}}}}</tool_call>
@@ -237,6 +244,25 @@ async def run_agent_turn(
                 "summary": result.get("summary", ""),
                 "render": result.get("render"),
             }
+
+            # Early exit: if the tool succeeded (fix_bug / refactor_code), stop the loop
+            # immediately — small models tend to re-call the tool instead of writing a reply.
+            if result.get("render", {}).get("status") == "success":
+                convo.append({"role": "assistant", "content": text})
+                convo.append({
+                    "role": "user",
+                    "content": (
+                        f"[tool_result from {tool_name}]\n{result.get('summary', '')}\n\n"
+                        "Write one short sentence confirming success to the user. No tool calls."
+                    ),
+                })
+                final = await loop.run_in_executor(None, lambda: llm.invoke(_convo_to_prompt(convo)))
+                final_text = final.content if hasattr(final, "content") else str(final)
+                clean = _TOOL_CALL_RE.sub("", final_text).strip()
+                if clean:
+                    yield {"type": "message", "text": clean}
+                yield {"type": "done"}
+                return
 
             # Feed the tool result back to the LLM so it can interpret + respond
             convo.append({"role": "assistant", "content": text})

@@ -58,6 +58,8 @@ class FileReviewResult(BaseModel):
     patch: str = ""
     applies_cleanly: bool = False
     reflexion_attempts: int = 1
+    eval_score: Optional[int] = None   # LLM quality score 1-5 (api/agent/evaluator.py)
+    eval_reason: str = ""              # Evaluator feedback text
     risk_level: str = "unknown"  # low | medium | high | unknown
 
 
