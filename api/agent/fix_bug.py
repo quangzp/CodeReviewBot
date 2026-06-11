@@ -73,7 +73,7 @@ async def fix_bug_in_project(
     try:
         # ── Harness: Memory READ ─────────────────────────────────────────────
         try:
-            from src_bot.memory.graphiti_store import build_memory_context
+            from src_bot.memory.memory_neo4j import build_memory_context
             _owner = project.repo_name.split("/")[0]
             _memory_ctx = await build_memory_context(_owner, project.repo_name)
             if _memory_ctx:
@@ -230,7 +230,7 @@ async def fix_bug_in_project(
             # ── Harness: Memory WRITE ────────────────────────────────────────
             try:
                 from src_bot.memory.extractor import extract_facts_from_review
-                from src_bot.memory.graphiti_store import record_review as graphiti_record_review
+                from src_bot.memory.memory_neo4j import record_review as graphiti_record_review
                 _owner = project.repo_name.split("/")[0]
                 fact = await loop.run_in_executor(
                     None,

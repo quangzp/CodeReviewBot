@@ -121,20 +121,44 @@ def get_llm(
     provider: str | None = None,
     model: str | None = None,
     temperature: float = 0,
+    role: str | None = None,
 ) -> BaseChatModel:
     """
     Create and return an LLM instance based on the configured provider.
 
     Args:
-        provider: Override LLM_PROVIDER env var.
-        model: Override LLM_MODEL env var.
+        provider: Override the provider (LLM_PROVIDER env var).
+        model: Override the model (LLM_MODEL env var).
         temperature: Sampling temperature (0 = deterministic).
+        role: Optional routing hint — "fast_gate" | "generation" | "chat".
+              When set, uses role-specific env vars before falling back to defaults.
+              - fast_gate: classifier + evaluator (FAST_LLM_PROVIDER / FAST_LLM_MODEL)
+              - generation: Phase 1-2-3, reflexion (GEN_LLM_PROVIDER / GEN_LLM_MODEL)
+              - chat: agent loop (same as fast_gate — low latency preferred)
 
     Returns:
         A LangChain-compatible chat model.
     """
+    from src_bot.config.config import configs
+
+    # Role-based provider/model resolution — overrides env defaults when set
+    if role and not provider and not model:
+        if role in ("fast_gate", "chat"):
+            provider = configs.FAST_LLM_PROVIDER or None
+            model = configs.FAST_LLM_MODEL or None
+        elif role == "generation":
+            provider = configs.GEN_LLM_PROVIDER or None
+            model = configs.GEN_LLM_MODEL or None
+
     provider = (provider or os.getenv("LLM_PROVIDER", "ollama")).lower()
     model = model or os.getenv("LLM_MODEL", "")
+
+    # vLLM base URL selection based on role
+    vllm_base = ""
+    if role in ("fast_gate", "chat") and configs.VLLM_FAST_BASE:
+        vllm_base = configs.VLLM_FAST_BASE
+    elif role == "generation" and configs.VLLM_GEN_BASE:
+        vllm_base = configs.VLLM_GEN_BASE
 
     if provider == "ollama":
         return _create_ollama(model or "deepseek-coder:6.7b-instruct", temperature)
@@ -150,7 +174,7 @@ def get_llm(
         return _with_rate_limit_retry(llm)
     elif provider == "vllm":
         # vLLM is self-hosted — no rate limits, no retry wrapper needed
-        return _create_vllm(model or VLLM_DEFAULT_MODEL, temperature)
+        return _create_vllm(model or VLLM_DEFAULT_MODEL, temperature, vllm_base)
     else:
         raise ValueError(
             f"Unknown LLM_PROVIDER: '{provider}'. "
@@ -225,30 +249,31 @@ def _create_together(model: str, temperature: float) -> BaseChatModel:
     )
 
 
-def _create_vllm(model: str, temperature: float) -> BaseChatModel:
+def _create_vllm(model: str, temperature: float, base_url: str = "") -> BaseChatModel:
     """
     Self-hosted vLLM server — free, no rate limits.
 
     vLLM exposes an OpenAI-compatible API, so we reuse ChatOpenAI.
     Set VLLM_API_BASE to your server URL (default: http://localhost:8000/v1).
+    For dual-endpoint setup use VLLM_FAST_BASE / VLLM_GEN_BASE — the router
+    selects the correct URL based on the role= parameter.
 
-    Recommended model: R2E-Gym/R2EGym-32B (fine-tuned for SWE-bench, ~34% pass@1)
+    Recommended models:
+      fast_gate / chat : llama-3.1-8b-instant on RTX 3090 (VLLM_FAST_BASE)
+      generation       : llama-3.3-70b on A100 80GB (VLLM_GEN_BASE)
 
     Setup on Vast.ai / Lambda / RunPod:
         pip install vllm
         python -m vllm.entrypoints.openai.api_server \\
-            --model R2E-Gym/R2EGym-32B \\
-            --dtype float16 \\
-            --max-model-len 16384 \\
-            --port 8000
+            --model <model> --dtype float16 --max-model-len 16384 --port 8000
     """
     from langchain_openai import ChatOpenAI
 
-    base_url = os.getenv("VLLM_API_BASE", "http://localhost:8000/v1")
+    resolved_base = base_url or os.getenv("VLLM_API_BASE", "http://localhost:8000/v1")
     return ChatOpenAI(
         model=model,
         temperature=temperature,
         api_key="dummy",          # vLLM doesn't require auth
-        base_url=base_url,
+        base_url=resolved_base,
         max_tokens=4096,
     )

@@ -90,9 +90,8 @@ async def require_user(user: Optional[dict] = Depends(get_current_user)) -> dict
 async def lifespan(app: FastAPI):
     await init_db()
     yield
-    # Clean up Graphiti connection on shutdown
-    from src_bot.memory.graphiti_store import close as graphiti_close
-    await graphiti_close()
+    from src_bot.memory.memory_neo4j import close as memory_close
+    await memory_close()
 
 
 app = FastAPI(title="GraphRAG Code Review Bot", lifespan=lifespan)
@@ -389,56 +388,32 @@ async def stream_review(review_id: str, user: dict = Depends(require_user)):
 
 
 # ---------------------------------------------------------------------------
-# Memory: developer profiles & learned patterns
+# Memory: developer profiles & learned patterns (read from Neo4j MemoryStore)
 # ---------------------------------------------------------------------------
-def _get_memory_store():
-    """Lazy-init memory store. Returns None if Neo4j is unreachable."""
-    from neo4j import GraphDatabase
-    from src_bot.config.config import configs
-    from src_bot.memory import MemoryStore
-    try:
-        driver = GraphDatabase.driver(
-            configs.APP_NEO4J_URL,
-            auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
-        )
-        driver.verify_connectivity()
-        return MemoryStore(driver), driver
-    except Exception as e:
-        return None, None
-
 
 @app.get("/api/developers")
 async def list_developers(user: dict = Depends(require_user)):
     """List all developers the bot has seen."""
-    store, driver = _get_memory_store()
-    if not store:
-        return []
+    from src_bot.memory.memory_neo4j import list_developers_from_memory
     try:
-        devs = store.list_developers(limit=100)
-        return [d.model_dump(mode="json") for d in devs]
-    finally:
-        if driver:
-            driver.close()
+        return await list_developers_from_memory(limit=100)
+    except Exception:
+        return []
 
 
 @app.get("/api/developers/{login}")
 async def get_developer(login: str, user: dict = Depends(require_user)):
-    """Get full profile for a developer: patterns, recent reviews, evidence."""
-    store, driver = _get_memory_store()
-    if not store:
-        raise HTTPException(status_code=503, detail="Memory store unavailable")
+    """Get full developer profile from memory."""
+    from src_bot.memory.memory_neo4j import get_developer_profile
     try:
-        profile = store.get_developer_profile(login)
-        if not profile:
+        profile = await get_developer_profile(login)
+        if not profile or profile.get("fact_count", 0) == 0:
             raise HTTPException(status_code=404, detail="Developer not found")
-        recent = store.get_recent_reviews_for_developer(login, limit=10)
-        return {
-            "profile": profile.model_dump(mode="json"),
-            "recent_reviews": recent,
-        }
-    finally:
-        if driver:
-            driver.close()
+        return profile
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Memory store unavailable")
 
 
 # ---------------------------------------------------------------------------

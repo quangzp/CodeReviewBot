@@ -14,8 +14,8 @@ and trigger another reflexion attempt with the evaluator's feedback.
 """
 from __future__ import annotations
 
-from groq import Groq
 from src_bot.config.config import configs
+from src_bot.llm.router import get_llm
 
 EVALUATOR_PROMPT = """You are a code patch quality evaluator. A developer wrote a patch to fix a bug.
 Your job is to score this patch from 1 to 5.
@@ -36,8 +36,7 @@ Score the patch:
 Reply with ONLY this JSON (no explanation):
 {"score": <1-5>, "reason": "<one sentence>"}"""
 
-REFACTOR_EVALUATOR_PROMPT = """You are a code refactoring quality evaluator. A developer wrote a patch to refactor code.
-Your job is to score this patch from 1 to 5.
+REFACTOR_EVALUATOR_PROMPT = """You are a code refactoring quality evaluator. Score the refactoring patch from 1 to 5.
 
 REFACTORING REQUEST:
 REPLACE_BUG
@@ -45,12 +44,19 @@ REPLACE_BUG
 PATCH:
 REPLACE_PATCH
 
-Score the patch:
-5 = Preserves ALL behavior, clearly improves readability/structure as requested, minimal change
-4 = Good refactoring with minor style issues or slightly over-engineered
-3 = Partially addresses the request, misses some scope or has minor logic drift
-2 = Changes behavior unexpectedly, or doesn't address the refactoring request
-1 = Breaks functionality or is completely unrelated to the request
+Score using ALL five criteria:
+1. Behavior preservation (most important): Does the patch preserve ALL existing behavior?
+2. Readability improvement: Does the change improve code clarity?
+3. Complexity reduction: Does it reduce cyclomatic complexity or nesting depth?
+4. Backward compatibility: Are function signatures, return types, and public APIs unchanged?
+5. Minimality: Is the change focused on what was requested, not over-engineered?
+
+Scoring:
+5 = Preserves ALL behavior, clearly improves readability/structure, minimal change, APIs unchanged
+4 = Good refactoring, minor style issues, or slightly broader than requested
+3 = Partially addresses the request, may have minor behavior drift or miss some scope
+2 = Changes behavior unexpectedly, breaks an API signature, or does not address the request
+1 = Breaks functionality, introduces bugs, or is completely unrelated
 
 Reply with ONLY this JSON (no explanation):
 {"score": <1-5>, "reason": "<one sentence>"}"""
@@ -71,21 +77,17 @@ def evaluate_patch(bug_description: str, patch: str, mode: str = "bug_fix") -> t
         return 1, "Empty patch"
 
     try:
-        client = Groq(api_key=configs.GROQ_API_KEY)
+        from langchain_core.messages import HumanMessage
+        import json, re
         template = REFACTOR_EVALUATOR_PROMPT if mode == "refactor" else EVALUATOR_PROMPT
         prompt = (
             template
             .replace("REPLACE_BUG", bug_description[:500])
             .replace("REPLACE_PATCH", patch[:1500])
         )
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=80,
-        )
-        import json, re
-        raw = response.choices[0].message.content.strip()
+        llm = get_llm(role="fast_gate", temperature=0)
+        response = llm.invoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
         match = re.search(r'\{.*?\}', raw, re.DOTALL)
         if match:
             data = json.loads(match.group())

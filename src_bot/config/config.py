@@ -49,12 +49,23 @@ class Configs(BaseSettings):
     WEAVIATE_COLLECTION_NAME: str = os.getenv("WEAVIATE_COLLECTION_NAME", "")
 
     # LLM Configuration
-    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")  # ollama | groq | openai | together
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")  # ollama | groq | openai | together | vllm
     LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
     LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0"))
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     TOGETHER_API_KEY: str = os.getenv("TOGETHER_API_KEY", "")
+
+    # Tri-backend LLM config (2 vLLM + 1 Groq fallback)
+    # fast_gate role: classifier + evaluator (small/fast model)
+    FAST_LLM_PROVIDER: str = os.getenv("FAST_LLM_PROVIDER", "groq")
+    FAST_LLM_MODEL: str = os.getenv("FAST_LLM_MODEL", "llama-3.1-8b-instant")
+    # generation role: Phase 1-2-3 + reflexion (large model)
+    GEN_LLM_PROVIDER: str = os.getenv("GEN_LLM_PROVIDER", "")   # empty = use LLM_PROVIDER
+    GEN_LLM_MODEL: str = os.getenv("GEN_LLM_MODEL", "")          # empty = use LLM_MODEL
+    # vLLM dual-endpoint config
+    VLLM_FAST_BASE: str = os.getenv("VLLM_FAST_BASE", "")
+    VLLM_GEN_BASE: str = os.getenv("VLLM_GEN_BASE", "")
 
     # Reflexion settings
     REFLEXION_MAX_RETRIES: int = int(os.getenv("REFLEXION_MAX_RETRIES", "3"))

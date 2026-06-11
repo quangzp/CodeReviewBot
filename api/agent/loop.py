@@ -23,9 +23,13 @@ import asyncio
 import re
 from typing import AsyncGenerator, Optional
 
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
+
 from src_bot.config.config import configs
 from src_bot.llm.router import get_llm
 from api.agent.tools import build_tool_registry, TOOL_DESCRIPTIONS
+
+READ_ONLY_TOOLS = {"list_projects", "project_status", "recent_reviews"}
 
 
 # ============================================================================
@@ -200,8 +204,8 @@ async def run_agent_turn(
             yield {"type": "thinking", "step": step + 1}
 
             # Format the chat for the LLM
-            prompt = _convo_to_prompt(convo)
-            response = await loop.run_in_executor(None, lambda: llm.invoke(prompt))
+            messages = _convo_to_messages(convo)
+            response = await loop.run_in_executor(None, lambda: llm.invoke(messages))
             text = response.content if hasattr(response, "content") else str(response)
 
             tool_call = _parse_tool_call(text)
@@ -221,14 +225,26 @@ async def run_agent_turn(
             yield {"type": "tool_call", "name": tool_name, "args": tool_args}
 
             if tool_name not in tools:
+                # Give the LLM a chance to self-correct with the available tool list
+                convo.append({"role": "assistant", "content": text})
+                convo.append({
+                    "role": "user",
+                    "content": (
+                        f"[ERROR] Unknown tool '{tool_name}'. "
+                        f"Available tools: {', '.join(tools.keys())}. "
+                        "Please try again with a valid tool name, or answer directly without a tool."
+                    ),
+                })
                 yield {
                     "type": "tool_result",
                     "name": tool_name,
                     "summary": f"Unknown tool: {tool_name}",
-                    "render": {"kind": "error", "message": f"Unknown tool '{tool_name}'"},
+                    "render": {
+                        "kind": "error",
+                        "message": f"Unknown tool '{tool_name}'. Available: {', '.join(tools.keys())}",
+                    },
                 }
-                yield {"type": "done"}
-                return
+                continue
 
             try:
                 result = await tools[tool_name](**tool_args)
@@ -245,6 +261,28 @@ async def run_agent_turn(
                 "render": result.get("render"),
             }
 
+            # Early exit for read-only tools — they don't set render.status=="success"
+            # but small models will re-call them if we don't force a final reply.
+            if tool_name in READ_ONLY_TOOLS:
+                convo.append({"role": "assistant", "content": text})
+                convo.append({
+                    "role": "user",
+                    "content": (
+                        f"[tool_result from {tool_name}]\n{result.get('summary', '')}\n\n"
+                        "The data above is already shown to the user. "
+                        "Write one short sentence describing what was found. No tool calls."
+                    ),
+                })
+                final = await loop.run_in_executor(
+                    None, lambda: llm.invoke(_convo_to_messages(convo))
+                )
+                final_text = final.content if hasattr(final, "content") else str(final)
+                clean = _TOOL_CALL_RE.sub("", final_text).strip()
+                if clean:
+                    yield {"type": "message", "text": clean}
+                yield {"type": "done"}
+                return
+
             # Early exit: if the tool succeeded (fix_bug / refactor_code), stop the loop
             # immediately — small models tend to re-call the tool instead of writing a reply.
             if result.get("render", {}).get("status") == "success":
@@ -256,7 +294,9 @@ async def run_agent_turn(
                         "Write one short sentence confirming success to the user. No tool calls."
                     ),
                 })
-                final = await loop.run_in_executor(None, lambda: llm.invoke(_convo_to_prompt(convo)))
+                final = await loop.run_in_executor(
+                    None, lambda: llm.invoke(_convo_to_messages(convo))
+                )
                 final_text = final.content if hasattr(final, "content") else str(final)
                 clean = _TOOL_CALL_RE.sub("", final_text).strip()
                 if clean:
@@ -277,7 +317,13 @@ async def run_agent_turn(
             })
 
         # Hit max steps without a final answer
-        yield {"type": "message", "text": "(reached max steps)"}
+        yield {
+            "type": "message",
+            "text": (
+                "I've reached the maximum number of steps for this turn. "
+                "Please send another message to continue."
+            ),
+        }
         yield {"type": "done"}
 
     except Exception as e:
@@ -289,11 +335,16 @@ async def run_agent_turn(
         }
 
 
-def _convo_to_prompt(convo: list[dict]) -> str:
-    """Render the conversation as a single prompt string."""
-    parts = []
+def _convo_to_messages(convo: list[dict]):
+    """Convert conversation dicts to LangChain message objects."""
+    messages = []
     for msg in convo:
-        role = msg["role"].upper()
-        parts.append(f"{role}: {msg['content']}")
-    parts.append("ASSISTANT:")
-    return "\n\n".join(parts)
+        role = msg["role"]
+        content = msg["content"]
+        if role == "system":
+            messages.append(SystemMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+        else:
+            messages.append(HumanMessage(content=content))
+    return messages

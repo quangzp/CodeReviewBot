@@ -4,7 +4,8 @@ __pycache__/
 policy.txt
 test_data_output.json
 git_test.py
-*test*
+# Only ignore specific test artifacts, not the tests/ directory
+*test*.json
 ingest_to_weaviate.py
 
 # Project clones (git repos cloned at runtime — large, not source code)

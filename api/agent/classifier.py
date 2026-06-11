@@ -14,9 +14,9 @@ the refusal boundary much harder to bypass via prompt injection.
 from __future__ import annotations
 
 from enum import Enum
-from groq import Groq
 
 from src_bot.config.config import configs
+from src_bot.llm.router import get_llm
 
 
 class Intent(str, Enum):
@@ -83,15 +83,11 @@ def classify(message: str) -> tuple[Intent, str]:
     clarification_hint is non-empty only when intent == CLARIFY.
     """
     try:
-        client = Groq(api_key=configs.GROQ_API_KEY)
+        from langchain_core.messages import HumanMessage
         prompt = CLASSIFIER_PROMPT_TEMPLATE.replace("REPLACE_MESSAGE", message[:500])
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",   # always use the small fast model
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0,
-            max_tokens=60,
-        )
-        raw = response.choices[0].message.content.strip()
+        llm = get_llm(role="fast_gate", temperature=0)
+        response = llm.invoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
 
         # Parse JSON response
         import json, re

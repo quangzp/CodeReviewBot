@@ -25,6 +25,39 @@ from api.models import ProjectRecord
 from api.project_indexer import get_project_dir
 
 
+async def detect_refactoring_targets(
+    project: ProjectRecord,
+    file_path: str = "",
+) -> list[dict]:
+    """
+    Detect code smells in a project using the Neo4j graph.
+    Returns a list of smell dicts suitable for chat display.
+    """
+    from neo4j import GraphDatabase
+    from api.agent.smell_detector import detect_all_smells
+
+    driver = GraphDatabase.driver(
+        configs.APP_NEO4J_URL,
+        auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
+    )
+    try:
+        with driver.session() as session:
+            smells = detect_all_smells(session, project.id, file_path)
+            return [
+                {
+                    "smell_type": s.smell_type,
+                    "file_path": s.file_path,
+                    "name": s.name,
+                    "severity": s.severity,
+                    "description": s.description,
+                    "metric_value": s.metric_value,
+                }
+                for s in smells
+            ]
+    finally:
+        driver.close()
+
+
 async def refactor_code_in_project(
     project: ProjectRecord,
     refactor_description: str,
@@ -111,6 +144,26 @@ async def refactor_code_in_project(
 
             file_content = target.read_text(errors="ignore")
             graph_context = _get_graph_context_for_file(session, file_path, project_id)
+
+            # Detect code smells to enrich the refactor prompt
+            smell_context = ""
+            try:
+                from api.agent.smell_detector import detect_all_smells
+                smells = detect_all_smells(session, project_id, file_path)
+                if smells:
+                    smell_lines = ["## Detected code smells in this file:"]
+                    for s in smells[:5]:
+                        smell_lines.append(
+                            f"  - [{s.severity.upper()}] {s.smell_type}: {s.description}"
+                        )
+                    smell_context = "\n".join(smell_lines)
+            except Exception:
+                pass
+
+            if smell_context:
+                refactor_description = (
+                    f"{smell_context}\n\n---\n\nRefactoring request: {refactor_description}"
+                )
 
             # ------------------------------------------------------------------
             # Reflexion loop — Phase 3 with refactor prompt
@@ -205,6 +258,39 @@ async def refactor_code_in_project(
                         "last_error": last_error,
                     },
                 }
+
+            # Memory write — record refactoring in Graphiti
+            try:
+                from src_bot.memory.extractor import extract_facts_from_review
+                from src_bot.memory.memory_neo4j import record_review as graphiti_record_review
+                _owner = project.repo_name.split("/")[0]
+                fact = await loop.run_in_executor(
+                    None,
+                    lambda: extract_facts_from_review(
+                        llm,
+                        repo_name=project.repo_name,
+                        pr_number=0,
+                        pr_url=f"chat-refactor/{project.id}",
+                        author_login=_owner,
+                        files_touched=[file_path],
+                        issue_text=refactor_description,
+                        review_output=(
+                            f"Refactored: {file_path}\n"
+                            f"Patch (eval_score={final_eval_score}/5):\n"
+                            f"```diff\n{final_patch[:1000]}\n```"
+                        ),
+                    ),
+                )
+                await graphiti_record_review(
+                    developer_login=_owner,
+                    repo_name=project.repo_name,
+                    pr_number=0,
+                    pr_url=f"chat-refactor/{project.id}",
+                    summary=fact.summary,
+                    bug_patterns=fact.bug_patterns,
+                )
+            except Exception as e:
+                print(f"  [memory] Refactor memory write failed: {e}")
 
             return {
                 "summary": (

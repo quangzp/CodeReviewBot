@@ -254,7 +254,7 @@ async def run_pr_review(
             _verify_patch_applies, _get_graph_context_for_file,
         )
         from src_bot.reflexion.reflector import generate_reflection
-        from src_bot.memory.graphiti_store import build_memory_context, record_review as graphiti_record_review
+        from src_bot.memory.memory_neo4j import build_memory_context, record_review as graphiti_record_review
         from src_bot.memory.extractor import extract_facts_from_review
 
         # ----------------------------------------------------------------
