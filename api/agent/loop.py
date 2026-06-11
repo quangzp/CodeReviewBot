@@ -185,11 +185,7 @@ async def run_agent_turn(
             return
 
         # IN_SCOPE — proceed to main agent
-        llm = get_llm(
-            provider=configs.LLM_PROVIDER,
-            model=configs.LLM_MODEL,
-            temperature=0.2,
-        )
+        llm = get_llm(role="chat", temperature=0.2)
         tools = build_tool_registry()
 
         # Build the conversation

@@ -108,6 +108,53 @@ def _with_rate_limit_retry(llm: BaseChatModel, max_retries: int = 5):
     return _RateLimitedLLM(llm, max_retries=max_retries)
 
 
+class _FallbackLLM:
+    """
+    Proxy that tries the primary LLM and falls back to a lazily-built
+    secondary on connection-class errors (server down, refused, timeout).
+    """
+
+    def __init__(self, primary, fallback_factory):
+        self._primary = primary
+        self._fallback_factory = fallback_factory
+        self._fallback = None
+
+    def __getattr__(self, name):
+        return getattr(self._primary, name)
+
+    def _get_fallback(self):
+        if self._fallback is None:
+            self._fallback = self._fallback_factory()
+            logger.info("Fallback LLM created")
+        return self._fallback
+
+    @staticmethod
+    def _is_connection_error(exc: Exception) -> bool:
+        err = str(exc).lower()
+        return any(k in err for k in (
+            "connection", "refused", "timeout", "unreachable",
+            "name or service not known", "nodename nor servname",
+        ))
+
+    def invoke(self, input, *args, **kwargs):
+        try:
+            return self._primary.invoke(input, *args, **kwargs)
+        except Exception as e:
+            if self._is_connection_error(e):
+                logger.warning(f"Primary LLM down ({e}), falling back")
+                return self._get_fallback().invoke(input, *args, **kwargs)
+            raise
+
+    async def ainvoke(self, input, *args, **kwargs):
+        try:
+            return await self._primary.ainvoke(input, *args, **kwargs)
+        except Exception as e:
+            if self._is_connection_error(e):
+                logger.warning(f"Primary LLM down ({e}), falling back")
+                return await self._get_fallback().ainvoke(input, *args, **kwargs)
+            raise
+
+
 # Groq free-tier models (as of 2025):
 #   llama-3.3-70b-versatile   — best quality, 70B params
 #   llama-3.1-8b-instant      — faster, 8B params
@@ -173,8 +220,14 @@ def get_llm(
         llm = _create_together(model or "openai/gpt-oss-20b", temperature)
         return _with_rate_limit_retry(llm)
     elif provider == "vllm":
-        # vLLM is self-hosted — no rate limits, no retry wrapper needed
-        return _create_vllm(model or VLLM_DEFAULT_MODEL, temperature, vllm_base)
+        primary = _create_vllm(model or VLLM_DEFAULT_MODEL, temperature, vllm_base)
+        # When using vLLM with a role, auto-fallback to Groq on connection errors
+        if role:
+            fallback_model = model or GROQ_DEFAULT_MODEL
+            def _groq_fallback():
+                return _with_rate_limit_retry(_create_groq(fallback_model, temperature))
+            return _FallbackLLM(primary, _groq_fallback)
+        return primary
     else:
         raise ValueError(
             f"Unknown LLM_PROVIDER: '{provider}'. "
