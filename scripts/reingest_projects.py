@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
-os.environ.setdefault("APP_NEO4J_PASSWORD", "CodeReview2024!")
 
 
 async def reingest_all(project_filter: str | None = None):

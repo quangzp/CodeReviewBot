@@ -1,4 +1,10 @@
 """
+DEAD CODE — do not use or import.
+
+graphiti_core is not installed. This file depends on graphiti_core.EmbedderClient
+and will ImportError if loaded. Kept for reference only.
+
+Original description:
 Custom sentence-transformers embedder for Graphiti.
 
 Implements graphiti_core's EmbedderClient interface using a local

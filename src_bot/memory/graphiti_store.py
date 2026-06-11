@@ -1,4 +1,11 @@
 """
+DEAD CODE — do not use or import.
+
+graphiti_core is not installed in this project. Active memory layer is
+src_bot/memory/memory_neo4j.py (wrapper around store.py).
+This file is kept only for historical reference; delete when no longer needed.
+
+Original description:
 Graphiti-backed institutional memory store.
 
 Replaces the custom store.py with the real graphiti-core library,

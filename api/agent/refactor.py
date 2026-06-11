@@ -96,7 +96,7 @@ async def refactor_code_in_project(
             },
         }
 
-    llm = get_llm(provider=configs.LLM_PROVIDER, model=configs.LLM_MODEL, temperature=0)
+    llm = get_llm(role="generation", temperature=0)
     driver = GraphDatabase.driver(
         configs.APP_NEO4J_URL,
         auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),

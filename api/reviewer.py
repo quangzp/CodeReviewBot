@@ -242,7 +242,7 @@ async def run_pr_review(
         # ----------------------------------------------------------------
         # 3. Set up LLM + Neo4j (reads only)
         # ----------------------------------------------------------------
-        llm = get_llm(provider=configs.LLM_PROVIDER, model=configs.LLM_MODEL, temperature=0)
+        llm = get_llm(role="generation", temperature=0)
         neo4j_driver = GraphDatabase.driver(
             configs.APP_NEO4J_URL,
             auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
