@@ -4,5 +4,30 @@ __pycache__/
 policy.txt
 test_data_output.json
 git_test.py
-*test*
+# Only ignore specific test artifacts, not the tests/ directory
+*test*.json
 ingest_to_weaviate.py
+
+# Project clones (git repos cloned at runtime — large, not source code)
+data/projects/
+
+# SQLite runtime database (contains user review data)
+data/reviews.db
+
+# SWE-bench prediction output files (generated artifacts)
+predictions*.jsonl
+
+# Frontend build artifacts and dependencies
+frontend/node_modules/
+frontend/dist/
+
+# Python build artifacts
+*.egg-info/
+dist/
+build/
+
+# Progress notes and personal planning files (not for version control)
+docs/claude-progress.md
+
+# SWE-bench prediction outputs (all variants)
+test_predictions*.jsonl

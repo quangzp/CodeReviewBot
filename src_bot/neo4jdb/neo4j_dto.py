@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 
 class Neo4jNodeDto(BaseModel):
     id: Optional[int] = None
@@ -51,5 +53,5 @@ class Neo4jPathDto(BaseModel):
 
 class Neo4jTraversalResultDto(BaseModel):
     endpoint: Neo4jNodeDto
-    paths: Neo4jPathDto | Any
+    paths: Union[Neo4jPathDto, Any]
     visited_nodes: List[Neo4jNodeDto]

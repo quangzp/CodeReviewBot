@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main, chatbot_dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      APP_NEO4J_URL: bolt://localhost:7687
+      APP_NEO4J_USER: neo4j
+      APP_NEO4J_PASSWORD: testpassword
+      GROQ_API_KEY: test_key_not_real
+      LLM_PROVIDER: groq
+      LLM_MODEL: llama-3.3-70b-versatile
+      FAST_LLM_PROVIDER: groq
+      FAST_LLM_MODEL: llama-3.1-8b-instant
+      LANGFUSE_ENABLED: "false"
+      EXECUTION_GATE_ENABLED: "false"
+      EMBEDDING_ENABLED: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest-asyncio pytest-cov
+
+      - name: Lint with ruff
+        run: |
+          pip install ruff
+          ruff check . --select E,F,W,I --ignore E501,F401
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short -x --cov --cov-report=term-missing
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Test frontend
+        run: npm test
