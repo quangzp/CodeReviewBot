@@ -103,14 +103,33 @@ async def get_developer_profile(developer_login: str) -> dict:
     store = _get_store()
     loop = asyncio.get_event_loop()
     profile = await loop.run_in_executor(None, store.get_developer_profile, developer_login)
+
+    _empty_dev = {
+        "login": developer_login,
+        "name": None,
+        "avatar_url": None,
+        "pr_count": 0,
+        "first_seen_at": None,
+        "last_seen_at": None,
+    }
+
     if not profile:
-        return {"developer": developer_login, "facts": [], "fact_count": 0}
+        return {"developer": _empty_dev, "facts": [], "fact_count": 0, "patterns": []}
+
+    dev = profile.developer
     facts = [
         f"{p.pattern.name}: confidence={int(p.confidence * 100)}%, evidence={p.evidence_count}"
         for p in profile.patterns
     ]
     return {
-        "developer": developer_login,
+        "developer": {
+            "login": dev.login,
+            "name": dev.name,
+            "avatar_url": dev.avatar_url,
+            "pr_count": dev.pr_count,
+            "first_seen_at": dev.first_seen_at.isoformat() if dev.first_seen_at else None,
+            "last_seen_at": dev.last_seen_at.isoformat() if dev.last_seen_at else None,
+        },
         "facts": facts,
         "fact_count": len(facts),
         "patterns": [

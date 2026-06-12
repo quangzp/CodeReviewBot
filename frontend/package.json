@@ -8,15 +8,19 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "react": "^18.3.1",
+    "react-diff-viewer-continued": "^3.4.0",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2",
-    "react-diff-viewer-continued": "^3.4.0"
+    "react-router-dom": "^6.26.2"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@testing-library/jest-dom": "^6.4.0",
     "@testing-library/react": "^14.3.0",
     "@testing-library/user-event": "^14.5.0",

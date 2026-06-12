@@ -81,8 +81,13 @@ def evaluate_patch_with_contract(
     patch: str,
     contract: "PlannerContract",  # type: ignore[name-defined]
     mode: str = "bug_fix",
+    llm_role: str = "fast_gate",
 ) -> tuple[int, str]:
     """Evaluate patch compliance against a specific PlannerContract.
+
+    llm_role: which model evaluates. Default 'fast_gate' (8B) is independent
+    from the 'generation' (70B) model that wrote the patch — this separation
+    is the key anti-self-evaluation-bias mechanism (Anthropic article 1).
 
     Falls back to generic evaluate_patch() if contract evaluation fails.
     """
@@ -99,7 +104,7 @@ def evaluate_patch_with_contract(
             .replace("REPLACE_PATCH", patch[:1500])
             .replace("REPLACE_CONTRACT", contract.to_evaluator_section())
         )
-        llm = get_llm(role="fast_gate", temperature=0)
+        llm = get_llm(role=llm_role, temperature=0)
         response = llm.invoke([HumanMessage(content=prompt)])
         raw = response.content.strip()
         match = re.search(r'\{.*?\}', raw, re.DOTALL)
@@ -112,15 +117,21 @@ def evaluate_patch_with_contract(
         pass
 
     # Fallback to generic evaluator
-    return evaluate_patch(bug_description, patch, mode)
+    return evaluate_patch(bug_description, patch, mode, llm_role=llm_role)
 
 
-def evaluate_patch(bug_description: str, patch: str, mode: str = "bug_fix") -> tuple[int, str]:
-    """
-    Evaluate patch quality using a fast LLM.
+def evaluate_patch(
+    bug_description: str,
+    patch: str,
+    mode: str = "bug_fix",
+    llm_role: str = "fast_gate",
+) -> tuple[int, str]:
+    """Evaluate patch quality using a fast, independent LLM.
 
     Args:
-        mode: "bug_fix" (default) or "refactor" — selects the scoring rubric.
+        mode:     "bug_fix" or "refactor" — selects the scoring rubric.
+        llm_role: model role for evaluation. Default 'fast_gate' (8B) is
+                  independent from 'generation' (70B) that wrote the patch.
 
     Returns (score 1-5, reason).
     score >= 3 = acceptable, < 3 = reject and retry.
@@ -138,7 +149,7 @@ def evaluate_patch(bug_description: str, patch: str, mode: str = "bug_fix") -> t
             .replace("REPLACE_BUG", bug_description[:500])
             .replace("REPLACE_PATCH", patch[:1500])
         )
-        llm = get_llm(role="fast_gate", temperature=0)
+        llm = get_llm(role=llm_role, temperature=0)
         response = llm.invoke([HumanMessage(content=prompt)])
         raw = response.content.strip()
         match = re.search(r'\{.*?\}', raw, re.DOTALL)
