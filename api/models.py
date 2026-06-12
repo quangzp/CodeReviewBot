@@ -60,7 +60,13 @@ class FileReviewResult(BaseModel):
     reflexion_attempts: int = 1
     eval_score: Optional[int] = None   # LLM quality score 1-5 (api/agent/evaluator.py)
     eval_reason: str = ""              # Evaluator feedback text
-    risk_level: str = "unknown"  # low | medium | high | unknown
+    risk_level: str = "unknown"        # low | medium | high | unknown
+    # Planner contract (Phase B)
+    plan_contract: Optional[dict] = None
+    # Verification gate results (Phase C)
+    ast_passed: Optional[bool] = None
+    tests_passed: Optional[bool] = None
+    tests_skipped: bool = True
 
 
 class ReviewRecord(BaseModel):

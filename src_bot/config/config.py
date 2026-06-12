@@ -67,6 +67,17 @@ class Configs(BaseSettings):
     VLLM_FAST_BASE: str = os.getenv("VLLM_FAST_BASE", "")
     VLLM_GEN_BASE: str = os.getenv("VLLM_GEN_BASE", "")
 
+    # Langfuse observability (opt-in — disabled by default)
+    LANGFUSE_ENABLED: bool = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"
+    LANGFUSE_PUBLIC_KEY: str = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+    LANGFUSE_SECRET_KEY: str = os.getenv("LANGFUSE_SECRET_KEY", "")
+    LANGFUSE_HOST: str = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+
+    # Execution-based verification gates
+    EXECUTION_GATE_ENABLED: bool = os.getenv("EXECUTION_GATE_ENABLED", "true").lower() == "true"
+    EXECUTION_GATE_TIMEOUT: int = int(os.getenv("EXECUTION_GATE_TIMEOUT", "300"))
+    EXECUTION_GATE_TEST_CMD: str = os.getenv("EXECUTION_GATE_TEST_CMD", "python -m pytest --tb=short -q")
+
     # Reflexion settings
     REFLEXION_MAX_RETRIES: int = int(os.getenv("REFLEXION_MAX_RETRIES", "3"))
 

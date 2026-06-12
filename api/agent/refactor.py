@@ -14,8 +14,11 @@ Returns the same render payload format as fix_bug for uniform chat UI rendering.
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -62,6 +65,7 @@ async def refactor_code_in_project(
     project: ProjectRecord,
     refactor_description: str,
     file_path: str = "",
+    user_login: str = "",
 ) -> dict:
     """
     Standalone refactoring using only the description + indexed project graph.
@@ -95,6 +99,22 @@ async def refactor_code_in_project(
                 "message": "Project clone is missing on disk. Re-index the project.",
             },
         }
+
+    # Set Langfuse trace context before creating the LLM
+    _langfuse_active = False
+    try:
+        from src_bot.observability.langfuse_ctx import set_trace_context, clear_trace_context, LangfuseTraceContext
+        _repo_owner = project.repo_name.split("/")[0]
+        set_trace_context(LangfuseTraceContext(
+            trace_id=f"refactor-{project_id}",
+            session_id=project_id,
+            user_id=_repo_owner,
+            tags=["chat_refactor"],
+            metadata={"repo": project.repo_name},
+        ))
+        _langfuse_active = True
+    except Exception:
+        pass
 
     llm = get_llm(role="generation", temperature=0)
     driver = GraphDatabase.driver(
@@ -166,6 +186,20 @@ async def refactor_code_in_project(
                 )
 
             # ------------------------------------------------------------------
+            # Phase 2.5 — Planner: generate structured contract
+            # ------------------------------------------------------------------
+            from api.agent.planner import generate_plan_sync
+            contract = await loop.run_in_executor(
+                None,
+                generate_plan_sync,
+                smell_context or refactor_description[:500],
+                refactor_description,
+                file_path,
+                graph_context,
+                "refactor",
+            )
+
+            # ------------------------------------------------------------------
             # Reflexion loop — Phase 3 with refactor prompt
             # ------------------------------------------------------------------
             max_retries = configs.REFLEXION_MAX_RETRIES
@@ -212,25 +246,27 @@ async def refactor_code_in_project(
                 patch = _normalize_patch(patch, repo_dir)
                 applies_ok, apply_error = _verify_patch_applies(patch, repo_dir)
                 if applies_ok:
-                    # Evaluator with refactor rubric
-                    eval_score, eval_reason = 3, "not evaluated"
-                    try:
-                        from api.agent.evaluator import evaluate_patch
-                        eval_score, eval_reason = await loop.run_in_executor(
-                            None, evaluate_patch,
-                            refactor_description[:300], patch, "refactor",
-                        )
-                    except Exception:
-                        pass
+                    # ── Harness: Multi-gate Verification ─────────────────────
+                    from src_bot.verification.pipeline import verify_patch
+                    verification = await loop.run_in_executor(
+                        None,
+                        verify_patch,
+                        patch,
+                        repo_dir,
+                        refactor_description,
+                        "",
+                        contract,
+                        "refactor",
+                        configs.EXECUTION_GATE_ENABLED,
+                        configs.EXECUTION_GATE_TEST_CMD,
+                        configs.EXECUTION_GATE_TIMEOUT,
+                    )
+                    eval_score = verification.llm_score
+                    eval_reason = verification.llm_reason
 
-                    if eval_score < 3 and attempt < max_retries:
+                    if not verification.passed and attempt < max_retries:
                         last_patch = patch
-                        last_error = (
-                            f"[EVALUATOR REJECTION score={eval_score}/5]\n"
-                            f"{eval_reason}\n\n"
-                            "The patch applied cleanly but failed quality review. "
-                            "Ensure behavior is fully preserved and the refactoring is complete."
-                        )
+                        last_error = verification.rejection_reason
                         continue
 
                     final_patch = patch
@@ -262,8 +298,11 @@ async def refactor_code_in_project(
             # Memory write — record refactoring in Graphiti
             try:
                 from src_bot.memory.extractor import extract_facts_from_review
-                from src_bot.memory.memory_neo4j import record_review as graphiti_record_review
-                _owner = project.repo_name.split("/")[0]
+                from src_bot.memory.memory_neo4j import (
+                    record_review as graphiti_record_review,
+                    record_topic_interest,
+                )
+                _author = user_login or project.repo_name.split("/")[0]
                 fact = await loop.run_in_executor(
                     None,
                     lambda: extract_facts_from_review(
@@ -271,7 +310,7 @@ async def refactor_code_in_project(
                         repo_name=project.repo_name,
                         pr_number=0,
                         pr_url=f"chat-refactor/{project.id}",
-                        author_login=_owner,
+                        author_login=_author,
                         files_touched=[file_path],
                         issue_text=refactor_description,
                         review_output=(
@@ -282,15 +321,28 @@ async def refactor_code_in_project(
                     ),
                 )
                 await graphiti_record_review(
-                    developer_login=_owner,
+                    developer_login=_author,
                     repo_name=project.repo_name,
                     pr_number=0,
                     pr_url=f"chat-refactor/{project.id}",
                     summary=fact.summary,
                     bug_patterns=fact.bug_patterns,
                 )
+                await record_topic_interest(
+                    _author,
+                    f"module:{file_path}",
+                    file_path.rsplit("/", 1)[-1],
+                    "module",
+                )
+                for pat in fact.bug_patterns:
+                    await record_topic_interest(
+                        _author,
+                        f"pattern:{pat}",
+                        pat.replace("-", " ").title(),
+                        "pattern",
+                    )
             except Exception as e:
-                print(f"  [memory] Refactor memory write failed: {e}")
+                logger.warning("[memory] Refactor memory write failed: %s", e)
 
             return {
                 "summary": (
@@ -313,3 +365,8 @@ async def refactor_code_in_project(
             }
     finally:
         driver.close()
+        if _langfuse_active:
+            try:
+                clear_trace_context()
+            except Exception:
+                pass

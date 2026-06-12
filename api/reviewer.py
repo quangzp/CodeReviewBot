@@ -16,6 +16,7 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import sys
 import os
@@ -23,6 +24,8 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -125,6 +128,21 @@ async def run_pr_review(
     loop = asyncio.get_event_loop()
     workdir: Optional[Path] = None
     neo4j_driver = None
+
+    # Set Langfuse trace context so every get_llm() call inside this review
+    # attaches its LLM generations to the same trace.
+    try:
+        from src_bot.observability.langfuse_ctx import set_trace_context, clear_trace_context, LangfuseTraceContext
+        set_trace_context(LangfuseTraceContext(
+            trace_id=record.id,
+            session_id=record.project_id,
+            user_id=record.author_login,
+            tags=["pr_review"],
+            metadata={"pr_url": record.pr_url, "repo": record.repo_name},
+        ))
+        _langfuse_active = True
+    except Exception:
+        _langfuse_active = False
 
     try:
         record.status = "running"
@@ -360,6 +378,24 @@ async def run_pr_review(
                     session, actual_file, project_id, top_k=_top_k
                 )
 
+                # ── Phase 2.5: Planner — generate structured contract ─────────
+                from api.agent.planner import generate_plan_sync
+                _contract = await loop.run_in_executor(
+                    None,
+                    generate_plan_sync,
+                    fault_desc,
+                    issue_text,
+                    actual_file,
+                    graph_context,
+                    "bug_fix",
+                )
+                _plan_context = _contract.to_prompt_section()
+                await emit("phase", {
+                    "phase": 2.5, "file": file_path, "status": "planned",
+                    "root_cause": _contract.root_cause[:120],
+                })
+                # ── End Planner ───────────────────────────────────────────────
+
                 # Phase 3: patch generation + Reflexion loop
                 reflections: list[str] = []
                 last_patch = ""
@@ -376,6 +412,7 @@ async def run_pr_review(
                         patch = await loop.run_in_executor(
                             None, phase3_generate_patch,
                             llm, issue_text, actual_file, fault_desc, file_content,
+                            "", "", _plan_context,
                         )
                     else:
                         try:
@@ -393,7 +430,7 @@ async def run_pr_review(
                         patch = await loop.run_in_executor(
                             None, phase3_generate_patch,
                             llm, issue_text, actual_file, fault_desc, file_content,
-                            reflection, last_patch,
+                            reflection, last_patch, _plan_context,
                         )
 
                     if not patch:
@@ -406,39 +443,43 @@ async def run_pr_review(
 
                     applies_ok, apply_error = _verify_patch_applies(patch, workdir)
                     if applies_ok:
-                        # ── Harness: Evaluator ──────────────────────────────
-                        # Independent LLM scores patch quality before accepting.
-                        eval_score, eval_reason = 3, "not evaluated"
-                        try:
-                            from api.agent.evaluator import evaluate_patch
-                            eval_score, eval_reason = await loop.run_in_executor(
-                                None, evaluate_patch,
-                                f"{issue_text[:300]}\nFault: {fault_desc}", patch,
-                            )
-                            await emit("phase", {
-                                "phase": 3, "file": file_path,
-                                "attempt": attempt, "status": "evaluated",
-                                "eval_score": eval_score, "eval_reason": eval_reason,
-                            })
-                        except Exception:
-                            pass
+                        # ── Harness: Multi-gate Verification ─────────────────
+                        from src_bot.verification.pipeline import verify_patch
+                        verification = await loop.run_in_executor(
+                            None,
+                            verify_patch,
+                            patch,
+                            workdir,
+                            issue_text,
+                            fault_desc,
+                            _contract,
+                            "bug_fix",
+                            configs.EXECUTION_GATE_ENABLED,
+                            configs.EXECUTION_GATE_TEST_CMD,
+                            configs.EXECUTION_GATE_TIMEOUT,
+                        )
+                        eval_score = verification.llm_score
+                        eval_reason = verification.llm_reason
+                        await emit("phase", {
+                            "phase": 3, "file": file_path,
+                            "attempt": attempt, "status": "evaluated",
+                            "eval_score": eval_score, "eval_reason": eval_reason,
+                            "ast_passed": verification.ast_result.passed,
+                            "tests_skipped": (
+                                verification.test_result.skipped
+                                if verification.test_result else True
+                            ),
+                        })
 
-                        if eval_score < 3 and attempt < max_retries:
-                            # Evaluator rejected — treat like a failed attempt
+                        if not verification.passed and attempt < max_retries:
                             last_patch = patch
-                            last_error = (
-                                f"[EVALUATOR REJECTION score={eval_score}/5]\n"
-                                f"{eval_reason}\n\n"
-                                f"The patch applied cleanly but failed quality review. "
-                                f"Focus on improving logic, not syntax."
-                            )
+                            last_error = verification.rejection_reason
                             await emit("phase", {
                                 "phase": 3, "file": file_path,
-                                "attempt": attempt, "status": "evaluator_rejected",
-                                "eval_score": eval_score, "eval_reason": eval_reason,
+                                "attempt": attempt, "status": "verification_rejected",
                             })
                             continue
-                        # ── End Evaluator ────────────────────────────────────
+                        # ── End Verification ──────────────────────────────────
 
                         file_result.patch = patch
                         file_result.applies_cleanly = True
@@ -534,7 +575,7 @@ async def run_pr_review(
                 "patterns": fact.bug_patterns,
             })
         except Exception as e:
-            print(f"  [memory] Failed to write memory: {e}")
+            logger.warning("[memory] Failed to write memory: %s", e)
 
         # ----------------------------------------------------------------
         # 7. Save & finalize
@@ -564,4 +605,9 @@ async def run_pr_review(
             _cleanup_workdir(record.id)
         except Exception:
             pass
+        if _langfuse_active:
+            try:
+                clear_trace_context()
+            except Exception:
+                pass
         await event_queue.put(None)  # close SSE

@@ -5,7 +5,15 @@ export interface FileReviewResult {
   patch: string
   applies_cleanly: boolean
   reflexion_attempts: number
-  risk_level: string // "low" | "medium" | "high" | "unknown"
+  eval_score?: number | null        // LLM quality score 1-5
+  eval_reason?: string              // Evaluator feedback
+  risk_level: string                // "low" | "medium" | "high" | "unknown"
+  // Planner contract (Phase B)
+  plan_contract?: Record<string, unknown> | null
+  // Verification gate results (Phase C)
+  ast_passed?: boolean | null
+  tests_passed?: boolean | null
+  tests_skipped?: boolean
 }
 
 export interface ReviewRecord {

@@ -25,3 +25,9 @@ frontend/dist/
 *.egg-info/
 dist/
 build/
+
+# Docs / planning files (slide decks, progress notes, architecture overviews)
+docs/
+
+# SWE-bench prediction outputs (all variants)
+test_predictions*.jsonl

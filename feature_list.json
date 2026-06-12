@@ -1,0 +1,105 @@
+[
+  {
+    "id": "F001",
+    "name": "Harness Engineering Files",
+    "status": "done",
+    "description": "AGENTS.md, init.sh, feature_list.json, claude-progress.md for Claude Code dev workflow reliability",
+    "files": ["AGENTS.md", "init.sh", "feature_list.json", "claude-progress.md"],
+    "depends_on": []
+  },
+  {
+    "id": "F002",
+    "name": "CodeContext Builder",
+    "status": "done",
+    "description": "Shared module encapsulating Phase 1 + Phase 2 into a reusable CodeContext dataclass",
+    "files": ["api/agent/code_context.py"],
+    "depends_on": []
+  },
+  {
+    "id": "F003",
+    "name": "Refactor Detector",
+    "status": "done",
+    "description": "Graph-based code smell detection: god classes, long methods, dead code, feature envy",
+    "files": ["api/agent/smell_detector.py"],
+    "depends_on": ["F007"]
+  },
+  {
+    "id": "F004",
+    "name": "Refactor Pipeline Upgrade",
+    "status": "done",
+    "description": "Add smell detection context and memory write to refactor_code_in_project()",
+    "files": ["api/agent/refactor.py"],
+    "depends_on": ["F002", "F003", "F005"]
+  },
+  {
+    "id": "F005",
+    "name": "Refactor Evaluator Rubric",
+    "status": "done",
+    "description": "Enhanced REFACTOR_EVALUATOR_PROMPT with 5 explicit criteria",
+    "files": ["api/agent/evaluator.py"],
+    "depends_on": []
+  },
+  {
+    "id": "F006",
+    "name": "Memory Cleanup",
+    "status": "done",
+    "description": "Switch /api/developers endpoints to read from Graphiti. Remove legacy MemoryStore imports.",
+    "files": ["api/main.py", "src_bot/memory/__init__.py"],
+    "depends_on": []
+  },
+  {
+    "id": "F007",
+    "name": "Neo4j Ingestion Improvements",
+    "status": "done",
+    "description": "Fix CALLS edges (qualified_name), write IMPORTS edges, add INHERITS edges, add line_count/method_count",
+    "files": ["swebench/neo4j_ingest.py"],
+    "depends_on": []
+  },
+  {
+    "id": "F008",
+    "name": "Retriever Update",
+    "status": "done",
+    "description": "Replace src_bot/memory/retriever.py to delegate to graphiti_store instead of legacy MemoryStore",
+    "files": ["src_bot/memory/retriever.py"],
+    "depends_on": ["F006"]
+  },
+  {
+    "id": "F009",
+    "name": "Unit Tests",
+    "status": "done",
+    "description": "Tests for classifier, evaluator, smell detector, code context",
+    "files": [
+      "tests/__init__.py",
+      "tests/conftest.py",
+      "tests/test_classifier.py",
+      "tests/test_evaluator.py",
+      "tests/test_smell_detector.py",
+      "tests/test_code_context.py"
+    ],
+    "depends_on": ["F002", "F003", "F005"]
+  },
+  {
+    "id": "F010",
+    "name": "Integration Tests",
+    "status": "done",
+    "description": "Tests for the 3-phase pipeline functions from run_swebench_v2.py",
+    "files": ["tests/test_pipeline_integration.py"],
+    "depends_on": ["F004", "F006", "F007", "F008"]
+  },
+  {
+    "id": "F011",
+    "name": "Agent Loop Improvements",
+    "status": "done",
+    "description": "Unknown tool self-correction + better max-steps message in loop.py",
+    "files": ["api/agent/loop.py"],
+    "depends_on": ["F002"]
+  },
+  {
+    "id": "F012",
+    "name": "End-to-End Verification",
+    "status": "done",
+    "description": "Smoke tests + manual verification checklist",
+    "files": ["tests/test_smoke.py"],
+    "depends_on": ["F001", "F002", "F003", "F004", "F005", "F006", "F007", "F008", "F009", "F010", "F011"]
+  }
+]

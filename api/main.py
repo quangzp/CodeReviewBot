@@ -3,6 +3,9 @@ import os
 import asyncio
 import json
 import secrets
+import logging
+
+logger = logging.getLogger(__name__)
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -111,6 +114,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ---------------------------------------------------------------------------
+# Health check — lightweight, no auth required
+# ---------------------------------------------------------------------------
+@app.get("/health")
+async def health():
+    """
+    Check liveness of all required services.
+    Returns 200 if everything is reachable, 503 with detail if not.
+    """
+    from src_bot.config.config import configs
+    status: dict = {"neo4j": "ok", "weaviate": "ok", "llm_provider": configs.LLM_PROVIDER}
+
+    # Check Neo4j
+    try:
+        from neo4j import GraphDatabase
+        driver = GraphDatabase.driver(
+            configs.APP_NEO4J_URL,
+            auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
+        )
+        driver.verify_connectivity()
+        driver.close()
+    except Exception as e:
+        status["neo4j"] = f"error: {e}"
+
+    # Check Weaviate (optional — skip if not configured)
+    try:
+        import httpx
+        r = httpx.get("http://localhost:8080/v1/.well-known/ready", timeout=2.0)
+        if r.status_code != 200:
+            status["weaviate"] = f"error: HTTP {r.status_code}"
+    except Exception as e:
+        status["weaviate"] = f"unreachable: {e}"
+
+    failed = [k for k, v in status.items() if isinstance(v, str) and v.startswith("error")]
+    if failed:
+        from fastapi.responses import JSONResponse as _JSONResponse
+        return _JSONResponse(status_code=503, content={"status": "degraded", **status})
+
+    return {"status": "ok", **status}
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +595,7 @@ async def chat_endpoint(
         async for event in run_agent_turn(
             user_message=req.message,
             history=history,
+            user_login=user_login,
         ):
             # Persist as we go
             etype = event.get("type")

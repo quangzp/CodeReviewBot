@@ -62,6 +62,59 @@ Reply with ONLY this JSON (no explanation):
 {"score": <1-5>, "reason": "<one sentence>"}"""
 
 
+CONTRACT_EVALUATOR_PROMPT = """You are a code patch quality evaluator checking against a specific plan.
+
+BUG/REFACTOR DESCRIPTION:
+REPLACE_BUG
+
+PATCH:
+REPLACE_PATCH
+
+REPLACE_CONTRACT
+
+Reply with ONLY this JSON (no explanation):
+{"score": <1-5>, "reason": "<one sentence>"}"""
+
+
+def evaluate_patch_with_contract(
+    bug_description: str,
+    patch: str,
+    contract: "PlannerContract",  # type: ignore[name-defined]
+    mode: str = "bug_fix",
+) -> tuple[int, str]:
+    """Evaluate patch compliance against a specific PlannerContract.
+
+    Falls back to generic evaluate_patch() if contract evaluation fails.
+    """
+    if not patch or not patch.strip():
+        return 1, "Empty patch"
+
+    try:
+        from langchain_core.messages import HumanMessage
+        import json, re
+
+        prompt = (
+            CONTRACT_EVALUATOR_PROMPT
+            .replace("REPLACE_BUG", bug_description[:500])
+            .replace("REPLACE_PATCH", patch[:1500])
+            .replace("REPLACE_CONTRACT", contract.to_evaluator_section())
+        )
+        llm = get_llm(role="fast_gate", temperature=0)
+        response = llm.invoke([HumanMessage(content=prompt)])
+        raw = response.content.strip()
+        match = re.search(r'\{.*?\}', raw, re.DOTALL)
+        if match:
+            data = json.loads(match.group())
+            score = int(data.get("score", 3))
+            reason = data.get("reason", "")
+            return max(1, min(5, score)), reason
+    except Exception:
+        pass
+
+    # Fallback to generic evaluator
+    return evaluate_patch(bug_description, patch, mode)
+
+
 def evaluate_patch(bug_description: str, patch: str, mode: str = "bug_fix") -> tuple[int, str]:
     """
     Evaluate patch quality using a fast LLM.

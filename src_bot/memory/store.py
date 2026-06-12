@@ -55,6 +55,7 @@ class MemoryStore:
             s.run("CREATE CONSTRAINT developer_login IF NOT EXISTS FOR (d:Developer) REQUIRE d.login IS UNIQUE")
             s.run("CREATE CONSTRAINT pattern_id IF NOT EXISTS FOR (p:BugPattern) REQUIRE p.id IS UNIQUE")
             s.run("CREATE CONSTRAINT review_id IF NOT EXISTS FOR (r:Review) REQUIRE r.id IS UNIQUE")
+            s.run("CREATE CONSTRAINT topic_id IF NOT EXISTS FOR (t:Topic) REQUIRE t.id IS UNIQUE")
             s.run("CREATE INDEX module_path IF NOT EXISTS FOR (m:Module) ON (m.path, m.project_id)")
 
     # -----------------------------------------------------------------
@@ -292,6 +293,66 @@ class MemoryStore:
                     "patterns": [p for p in row["patterns"] if p],
                 })
             return reviews
+
+
+    # -----------------------------------------------------------------
+    # Topic interest tracking — chat-driven learning
+    # -----------------------------------------------------------------
+    def record_topic_interest(
+        self,
+        developer_login: str,
+        topic_id: str,
+        topic_name: str,
+        category: str,
+    ) -> None:
+        """
+        Increment (Developer)-[:INTERESTED_IN]->(Topic) counter.
+        Called after every chat fix/refactor to track what the user asks about.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+        with self.driver.session() as s:
+            s.run("""
+                MERGE (t:Topic {id: $tid})
+                ON CREATE SET t.name = $name, t.category = $category,
+                              t.interest_count = 0, t.first_seen_at = $now
+                SET t.interest_count = COALESCE(t.interest_count, 0) + 1,
+                    t.last_seen_at = $now
+            """, tid=topic_id, name=topic_name, category=category, now=now)
+
+            s.run("""
+                MERGE (d:Developer {login: $login})
+                ON CREATE SET d.first_seen_at = $now, d.pr_count = 0
+                SET d.last_seen_at = $now
+            """, login=developer_login, now=now)
+
+            s.run("""
+                MATCH (d:Developer {login: $login}), (t:Topic {id: $tid})
+                MERGE (d)-[e:INTERESTED_IN]->(t)
+                ON CREATE SET e.count = 1, e.first_seen_at = $now
+                ON MATCH SET e.count = COALESCE(e.count, 0) + 1
+                SET e.last_seen_at = $now
+            """, login=developer_login, tid=topic_id, now=now)
+
+    def get_developer_topics(self, login: str, limit: int = 10) -> list[dict]:
+        """Get the topics a developer has most frequently asked about in chat."""
+        with self.driver.session() as s:
+            result = s.run("""
+                MATCH (d:Developer {login: $login})-[e:INTERESTED_IN]->(t:Topic)
+                RETURN t.id AS id, t.name AS name, t.category AS category,
+                       e.count AS count, e.last_seen_at AS last_seen_at
+                ORDER BY e.count DESC
+                LIMIT $limit
+            """, login=login, limit=limit)
+            return [
+                {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "category": row["category"],
+                    "count": row["count"] or 0,
+                    "last_seen_at": row["last_seen_at"],
+                }
+                for row in result
+            ]
 
 
 def _parse_dt(value) -> datetime:

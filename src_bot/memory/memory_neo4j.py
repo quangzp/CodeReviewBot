@@ -59,19 +59,43 @@ async def record_review(
     await loop.run_in_executor(None, store.record_review, fact, review_id)
 
 
+async def record_topic_interest(
+    developer_login: str,
+    topic_id: str,
+    topic_name: str,
+    category: str,
+) -> None:
+    store = _get_store()
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None, store.record_topic_interest, developer_login, topic_id, topic_name, category
+    )
+
+
 async def build_memory_context(developer_login: str, repo_name: str) -> str:
     store = _get_store()
     loop = asyncio.get_event_loop()
     profile = await loop.run_in_executor(None, store.get_developer_profile, developer_login)
-    if not profile or not profile.patterns:
+    topics = await loop.run_in_executor(None, store.get_developer_topics, developer_login)
+
+    if (not profile or not profile.patterns) and not topics:
         return ""
+
     lines = [f"## Developer Memory: {developer_login}"]
-    for p in profile.patterns[:10]:
-        conf_pct = int(p.confidence * 100)
-        lines.append(
-            f"- [{p.pattern.name}] confidence={conf_pct}%, "
-            f"seen {p.evidence_count}x"
-        )
+
+    if profile and profile.patterns:
+        for p in profile.patterns[:10]:
+            conf_pct = int(p.confidence * 100)
+            lines.append(
+                f"- [tends_to] {p.pattern.name}: confidence={conf_pct}%, "
+                f"seen {p.evidence_count}x"
+            )
+
+    if topics:
+        lines.append("### Frequently asked about:")
+        for t in topics[:5]:
+            lines.append(f"- [{t['category']}] {t['name']}: {t['count']}x")
+
     return "\n".join(lines)
 
 

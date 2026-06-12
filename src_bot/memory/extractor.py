@@ -7,11 +7,14 @@ This is what turns "the bot did a review" into "the bot LEARNED something."
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
 
 from langchain_core.language_models import BaseChatModel
+
+logger = logging.getLogger(__name__)
 
 from src_bot.memory.schema import ReviewFact
 
@@ -104,7 +107,7 @@ def extract_facts_from_review(
             summary = (data.get("summary") or summary)[:300]
     except Exception as e:
         # Extraction failure should never break the review
-        print(f"  [memory] Fact extraction failed: {e}")
+        logger.warning("[memory] Fact extraction failed: %s", e)
 
     return ReviewFact(
         developer_login=author_login,

@@ -235,11 +235,28 @@ def get_llm(
         )
 
 
+def _attach_langfuse(llm: BaseChatModel) -> BaseChatModel:
+    """Attach Langfuse callback to a base LangChain model if observability is enabled.
+
+    Must be called BEFORE wrapping in _RateLimitedLLM / _FallbackLLM so the
+    callback is on the underlying model that actually makes LLM calls.
+    """
+    try:
+        from src_bot.observability.langfuse_handler import get_langfuse_callback
+        handler = get_langfuse_callback()
+        if handler:
+            existing = list(getattr(llm, "callbacks", None) or [])
+            llm.callbacks = existing + [handler]
+    except Exception:
+        pass  # observability must never break the pipeline
+    return llm
+
+
 def _create_ollama(model: str, temperature: float) -> BaseChatModel:
     """Local Ollama model — free, good for development."""
     from langchain_ollama import ChatOllama
 
-    return ChatOllama(model=model, temperature=temperature)
+    return _attach_langfuse(ChatOllama(model=model, temperature=temperature))
 
 
 def _create_groq(model: str, temperature: float) -> BaseChatModel:
@@ -260,11 +277,11 @@ def _create_groq(model: str, temperature: float) -> BaseChatModel:
             "GROQ_API_KEY is required when LLM_PROVIDER=groq. "
             "Get a free key at https://console.groq.com/keys"
         )
-    return ChatGroq(
+    return _attach_langfuse(ChatGroq(
         model=model,
         temperature=temperature,
         api_key=api_key,
-    )
+    ))
 
 
 def _create_openai(model: str, temperature: float) -> BaseChatModel:
@@ -277,11 +294,11 @@ def _create_openai(model: str, temperature: float) -> BaseChatModel:
             "OPENAI_API_KEY is required when LLM_PROVIDER=openai. "
             "Set it in your .env file."
         )
-    return ChatOpenAI(
+    return _attach_langfuse(ChatOpenAI(
         model=model,
         temperature=temperature,
         api_key=api_key,
-    )
+    ))
 
 
 def _create_together(model: str, temperature: float) -> BaseChatModel:
@@ -294,12 +311,12 @@ def _create_together(model: str, temperature: float) -> BaseChatModel:
             "TOGETHER_API_KEY is required when LLM_PROVIDER=together. "
             "Set it in your .env file."
         )
-    return ChatOpenAI(
+    return _attach_langfuse(ChatOpenAI(
         model=model,
         temperature=temperature,
         api_key=api_key,
         base_url="https://api.together.xyz/v1",
-    )
+    ))
 
 
 def _create_vllm(model: str, temperature: float, base_url: str = "") -> BaseChatModel:
@@ -323,10 +340,10 @@ def _create_vllm(model: str, temperature: float, base_url: str = "") -> BaseChat
     from langchain_openai import ChatOpenAI
 
     resolved_base = base_url or os.getenv("VLLM_API_BASE", "http://localhost:8000/v1")
-    return ChatOpenAI(
+    return _attach_langfuse(ChatOpenAI(
         model=model,
         temperature=temperature,
         api_key="dummy",          # vLLM doesn't require auth
         base_url=resolved_base,
         max_tokens=4096,
-    )
+    ))

@@ -144,6 +144,7 @@ async def run_agent_turn(
     user_message: str,
     history: list[dict],
     max_steps: int = 4,
+    user_login: str = "",
 ) -> AsyncGenerator[dict, None]:
     """
     Run one agent turn. Yields events as JSON-serializable dicts.
@@ -162,6 +163,18 @@ async def run_agent_turn(
         {"type": "error", "message": ...}
     """
     try:
+        # Set Langfuse trace context for this agent turn
+        try:
+            import uuid
+            from src_bot.observability.langfuse_ctx import set_trace_context, LangfuseTraceContext
+            set_trace_context(LangfuseTraceContext(
+                trace_id=f"chat-{uuid.uuid4().hex[:12]}",
+                tags=["agent_chat"],
+                metadata={"message_preview": user_message[:80]},
+            ))
+        except Exception:
+            pass
+
         # ----------------------------------------------------------------
         # 0. Intent classification — runs BEFORE the main agent LLM
         #    Uses llama-3.1-8b-instant (fast, free) to gate out-of-scope
@@ -243,7 +256,7 @@ async def run_agent_turn(
                 continue
 
             try:
-                result = await tools[tool_name](**tool_args)
+                result = await tools[tool_name](**tool_args, user_login=user_login)
             except Exception as e:
                 result = {
                     "summary": f"Tool failed: {type(e).__name__}: {e}",

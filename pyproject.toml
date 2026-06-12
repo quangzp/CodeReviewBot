@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "codereviewbot"
+version = "0.1.0"
+description = "GraphRAG Code Review Bot — automated PR reviews using Neo4j + LangChain + Reflexion"
+requires-python = ">=3.9"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+exclude = [".venv", "__pycache__", "data/", "frontend/"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "F401",   # unused import — too noisy during dev
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+warn_unused_ignores = true

@@ -345,7 +345,7 @@ async def tool_review_pr(pr_url: str, **kwargs) -> dict:
     }
 
 
-async def tool_fix_bug(repo_name: str, bug_description: str, **kwargs) -> dict:
+async def tool_fix_bug(repo_name: str, bug_description: str, user_login: str = "", **kwargs) -> dict:
     """Fix a bug without a PR — chat-driven fix."""
     project = await get_project_by_repo_name(repo_name)
     if not project:
@@ -362,11 +362,17 @@ async def tool_fix_bug(repo_name: str, bug_description: str, **kwargs) -> dict:
             "render": {"kind": "error", "message": f"Project status is {project.status}."},
         }
 
-    result = await fix_bug_in_project(project, bug_description)
+    result = await fix_bug_in_project(project, bug_description, user_login=user_login)
     return result
 
 
-async def tool_refactor_code(repo_name: str, refactor_description: str, file_path: str = "", **kwargs) -> dict:
+async def tool_refactor_code(
+    repo_name: str,
+    refactor_description: str,
+    file_path: str = "",
+    user_login: str = "",
+    **kwargs,
+) -> dict:
     """Refactor code in a project without a PR."""
     project = await get_project_by_repo_name(repo_name)
     if not project:
@@ -383,7 +389,9 @@ async def tool_refactor_code(repo_name: str, refactor_description: str, file_pat
             "render": {"kind": "error", "message": f"Project status is {project.status}."},
         }
 
-    result = await refactor_code_in_project(project, refactor_description, file_path)
+    result = await refactor_code_in_project(
+        project, refactor_description, file_path, user_login=user_login
+    )
     return result
 
 

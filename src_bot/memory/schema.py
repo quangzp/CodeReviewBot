@@ -78,6 +78,16 @@ class PatternWithEvidence(BaseModel):
     example_pr_urls: list[str] = Field(default_factory=list)
 
 
+class Topic(BaseModel):
+    """A topic a developer has asked about in chat (module file or bug pattern)."""
+    id: str                 # "module:auth/login.py" or "pattern:missing-null-check"
+    name: str               # human-readable
+    category: str           # "module" | "pattern"
+    interest_count: int = 0
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+
 class ReviewFact(BaseModel):
     """
     A fact extracted from a completed review, to be persisted.

@@ -34,6 +34,7 @@ class CodeVisitor(ast.NodeVisitor):
         self.nodes = []       # list of dicts: {type, name, file_path, content, docstring, lineno}
         self.calls = []       # list of (caller_name, callee_name)
         self.imports = []     # list of module names imported
+        self.inherits = []    # list of (child_class_name, parent_class_name)
         self._current_class = None
         self._current_func = None
 
@@ -56,6 +57,12 @@ class CodeVisitor(ast.NodeVisitor):
         prev_class = self._current_class
         self._current_class = node.name
         content = self._get_source(node)
+        end_lineno = getattr(node, "end_lineno", node.lineno + 20)
+        method_count = sum(
+            1 for child in ast.walk(node)
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and child is not node
+        )
         self.nodes.append({
             "type": "Class",
             "name": node.name,
@@ -64,7 +71,15 @@ class CodeVisitor(ast.NodeVisitor):
             "content": content[:2000],
             "docstring": self._get_docstring(node),
             "lineno": node.lineno,
+            "line_count": end_lineno - node.lineno + 1,
+            "method_count": method_count,
         })
+        # Collect base class inheritance
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                self.inherits.append((node.name, base.id))
+            elif isinstance(base, ast.Attribute):
+                self.inherits.append((node.name, base.attr))
         self.generic_visit(node)
         self._current_class = prev_class
 
@@ -80,6 +95,7 @@ class CodeVisitor(ast.NodeVisitor):
         self._current_func = qualified
 
         content = self._get_source(node)
+        end_lineno = getattr(node, "end_lineno", node.lineno + 20)
         self.nodes.append({
             "type": "Method" if self._current_class else "Function",
             "name": node.name,
@@ -88,6 +104,8 @@ class CodeVisitor(ast.NodeVisitor):
             "content": content[:2000],
             "docstring": self._get_docstring(node),
             "lineno": node.lineno,
+            "line_count": end_lineno - node.lineno + 1,
+            "method_count": 0,
         })
 
         # Collect call relationships
@@ -195,8 +213,8 @@ def ingest_repo_to_neo4j(
                         f"{project_id}:{rel_path}:{node_data['qualified_name']}".encode()
                     ).hexdigest()
 
-                    session.run(f"""
-                        MERGE (n:CodeNode {{node_id: $nid}})
+                    session.run("""
+                        MERGE (n:CodeNode {node_id: $nid})
                         SET n.type = $type,
                             n.name = $name,
                             n.qualified_name = $qname,
@@ -204,9 +222,11 @@ def ingest_repo_to_neo4j(
                             n.content = $content,
                             n.docstring = $doc,
                             n.lineno = $lineno,
+                            n.line_count = $line_count,
+                            n.method_count = $method_count,
                             n.project_id = $pid
                         WITH n
-                        MATCH (m:Module {{file_path: $fp, project_id: $pid}})
+                        MATCH (m:Module {file_path: $fp, project_id: $pid})
                         MERGE (m)-[:DEFINES]->(n)
                     """, nid=node_id, type=node_data["type"],
                         name=node_data["name"],
@@ -215,17 +235,48 @@ def ingest_repo_to_neo4j(
                         content=node_data["content"],
                         doc=node_data["docstring"],
                         lineno=node_data["lineno"],
+                        line_count=node_data.get("line_count", 0),
+                        method_count=node_data.get("method_count", 0),
                         pid=project_id)
                     total_nodes += 1
 
-                # Ingest call relationships (best-effort name matching)
+                # Ingest call relationships — qualified_name first, name fallback
                 for caller, callee in visitor.calls[:50]:  # cap per file
                     session.run("""
                         MATCH (a:CodeNode {qualified_name: $caller, project_id: $pid})
-                        MATCH (b:CodeNode {name: $callee, project_id: $pid})
-                        WHERE a <> b
+                        OPTIONAL MATCH (bq:CodeNode {qualified_name: $callee, project_id: $pid})
+                        WHERE a <> bq
+                        OPTIONAL MATCH (bn:CodeNode {name: $callee, project_id: $pid})
+                        WHERE a <> bn AND bq IS NULL
+                        WITH a, COALESCE(bq, bn) AS b
+                        WHERE b IS NOT NULL
                         MERGE (a)-[:CALLS]->(b)
                     """, caller=caller, callee=callee, pid=project_id)
+                    total_rels += 1
+
+                # Ingest import relationships
+                for imp_module in visitor.imports[:30]:
+                    imp_name = imp_module.split(".")[-1]
+                    imp_path = imp_module.replace(".", "/") + ".py"
+                    session.run("""
+                        MATCH (m:Module {file_path: $fp, project_id: $pid})
+                        MATCH (target:Module {project_id: $pid})
+                        WHERE target.name = $imp_name
+                           OR target.file_path ENDS WITH $imp_path
+                        MERGE (m)-[:IMPORTS]->(target)
+                    """, fp=rel_path, pid=project_id,
+                        imp_name=imp_name, imp_path=imp_path)
+                    total_rels += 1
+
+                # Ingest inheritance relationships
+                for child_cls, parent_cls in visitor.inherits:
+                    session.run("""
+                        MATCH (c:CodeNode {name: $child, type: 'Class', project_id: $pid, file_path: $fp})
+                        MATCH (p:CodeNode {name: $parent, type: 'Class', project_id: $pid})
+                        WHERE c <> p
+                        MERGE (c)-[:INHERITS]->(p)
+                    """, child=child_cls, parent=parent_cls,
+                        pid=project_id, fp=rel_path)
                     total_rels += 1
 
                 file_count += 1

@@ -583,8 +583,13 @@ def phase3_generate_patch(
     file_content: str,
     reflection: str = "",
     failed_patch: str = "",
+    plan_context: str = "",
 ) -> str:
-    """Phase 3: Generate the actual patch. Accepts optional reflection for retry attempts."""
+    """Phase 3: Generate the actual patch. Accepts optional reflection for retry attempts.
+
+    Args:
+        plan_context: Optional PlannerContract.to_prompt_section() injected before the prompt.
+    """
 
     # ACI: add line numbers so patch @@ line numbers are accurate
     lines = file_content.split("\n")
@@ -610,6 +615,10 @@ def phase3_generate_patch(
             fault_description=fault_description[:500],
             file_content=content_for_prompt,
         )
+
+    # Prepend planner contract constraints when available
+    if plan_context:
+        prompt = plan_context + "\n\n---\n\n" + prompt
 
     try:
         response = llm.invoke(prompt)
@@ -954,6 +963,19 @@ def run_single_task(
     project_id = repo_name.replace("/", "_")
     max_retries = configs.REFLEXION_MAX_RETRIES if reflexion else 1  # 1 = no retries
 
+    # Set Langfuse trace context for this SWE-bench task
+    _langfuse_active = False
+    try:
+        from src_bot.observability.langfuse_ctx import set_trace_context, clear_trace_context, LangfuseTraceContext
+        set_trace_context(LangfuseTraceContext(
+            trace_id=instance_id,
+            tags=["swebench"],
+            metadata={"repo": repo_name, "base_commit": base_commit[:8]},
+        ))
+        _langfuse_active = True
+    except Exception:
+        pass
+
     # Clone + checkout
     repo_dir = clone_repo(repo_name)
     checkout_commit(repo_dir, base_commit)
@@ -1102,6 +1124,12 @@ def run_single_task(
                 last_patch = patch
                 last_error = f"git apply --check failed: {apply_error}"
                 patch = ""  # don't save a broken patch
+
+    if _langfuse_active:
+        try:
+            clear_trace_context()
+        except Exception:
+            pass
 
     return {
         "instance_id": instance_id,
