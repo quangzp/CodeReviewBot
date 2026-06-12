@@ -41,7 +41,7 @@ omit = [
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 35
+fail_under = 36
 
 [tool.mypy]
 python_version = "3.9"

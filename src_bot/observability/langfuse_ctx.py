@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 
 @dataclass
@@ -18,6 +18,26 @@ class LangfuseTraceContext:
 _current_trace: ContextVar[Optional[LangfuseTraceContext]] = ContextVar(
     "langfuse_trace", default=None
 )
+
+# Module-level singleton — avoids opening a new HTTP connection pool per phase call.
+_langfuse_client: Optional[Any] = None
+
+
+def _get_langfuse_client() -> Optional[Any]:
+    global _langfuse_client
+    if _langfuse_client is not None:
+        return _langfuse_client
+    try:
+        from src_bot.config.config import configs
+        from langfuse import Langfuse
+        _langfuse_client = Langfuse(
+            public_key=configs.LANGFUSE_PUBLIC_KEY,
+            secret_key=configs.LANGFUSE_SECRET_KEY,
+            host=configs.LANGFUSE_HOST,
+        )
+        return _langfuse_client
+    except Exception:
+        return None
 
 
 def set_trace_context(ctx: LangfuseTraceContext) -> None:
@@ -38,33 +58,31 @@ def langfuse_span(name: str, *, metadata: Optional[dict] = None):
 
     No-op when LANGFUSE_ENABLED=false or langfuse is not installed.
     Use inside an active langfuse_trace() context.
+
+    Exactly ONE yield — exceptions from setup are swallowed (observability
+    must never break the pipeline), exceptions from the body propagate normally.
     """
+    span = None
     try:
         from src_bot.config.config import configs
-        if not configs.LANGFUSE_ENABLED:
-            yield
-            return
-
-        from langfuse import Langfuse
-
-        ctx = get_trace_context()
-        if not ctx:
-            yield
-            return
-
-        langfuse = Langfuse(
-            public_key=configs.LANGFUSE_PUBLIC_KEY,
-            secret_key=configs.LANGFUSE_SECRET_KEY,
-            host=configs.LANGFUSE_HOST,
-        )
-        trace = langfuse.trace(id=ctx.trace_id)
-        span = trace.span(name=name, metadata=metadata or {})
-        try:
-            yield span
-        finally:
-            span.end()
+        if configs.LANGFUSE_ENABLED:
+            ctx = get_trace_context()
+            if ctx:
+                client = _get_langfuse_client()
+                if client:
+                    trace = client.trace(id=ctx.trace_id)
+                    span = trace.span(name=name, metadata=metadata or {})
     except Exception:
-        yield
+        pass  # setup failure → no-op span, pipeline continues unaffected
+
+    try:
+        yield span
+    finally:
+        if span is not None:
+            try:
+                span.end()
+            except Exception:
+                pass
 
 
 @contextmanager
