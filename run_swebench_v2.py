@@ -12,9 +12,11 @@ Target: 30%+ resolved with R2EGym-32B + GraphRAG + Reflexion.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -37,13 +39,20 @@ from swebench.neo4j_ingest import (
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-CACHED_TASKS_PATH = "/tmp/swebench_lite_tasks.json"
-REPOS_DIR = Path("/tmp/swebench_repos")
-INGESTION_CACHE = Path("/tmp/swebench_ingestion_cache.json")
+CACHED_TASKS_PATH = "D:/temp/swebench_lite_tasks.json"
+REPOS_DIR = Path("D:/temp/swebench_repos")
+INGESTION_CACHE = Path("D:/temp/swebench_ingestion_cache.json")
+# INGESTION_CACHE = Path("D:/temp/matplotlib_matplotlib_cache.json")
 
 NEO4J_URI = configs.APP_NEO4J_URL
 NEO4J_USER = configs.APP_NEO4J_USER
 NEO4J_PASSWORD = configs.APP_NEO4J_PASSWORD
+
+PHASE1_BM25_TOP_K = int(os.getenv("SWEBENCH_PHASE1_BM25_TOP_K", "150"))
+PHASE1_CANDIDATE_FILES = int(os.getenv("SWEBENCH_PHASE1_CANDIDATE_FILES", "30"))
+PHASE1_FILE_TREE_LIMIT = int(os.getenv("SWEBENCH_PHASE1_FILE_TREE_LIMIT", "500"))
+PHASE1_RETURN_FILES = int(os.getenv("SWEBENCH_PHASE1_RETURN_FILES", "3"))
+ALT_FILE_MAX_RETRIES = int(os.getenv("SWEBENCH_ALT_FILE_MAX_RETRIES", "1"))
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +65,58 @@ def load_ingestion_cache() -> dict:
 
 def save_ingestion_cache(cache: dict):
     INGESTION_CACHE.write_text(json.dumps(cache, indent=2))
+
+
+def make_project_id(repo_name: str, base_commit: str) -> str:
+    """Neo4j graph id for one SWE-bench repository snapshot."""
+    repo_key = repo_name.replace("/", "_")
+    return f"{repo_key}__{base_commit[:12]}"
+
+
+def make_ingestion_cache_key(repo_name: str, base_commit: str) -> str:
+    """Cache key must include the commit so graph context matches checkout."""
+    return f"{repo_name}@{base_commit}"
+
+
+def to_posix_path(path: str | Path) -> str:
+    """Normalize repo-relative paths to POSIX separators for SWE-bench diffs."""
+    return str(path).replace("\\", "/")
+
+
+def make_prediction(
+    *,
+    instance_id: str,
+    repo_name: str,
+    base_commit: str,
+    project_id: str,
+    model_patch: str = "",
+    selected_file: str = "",
+    attempted_files: list[str] | None = None,
+    fault_description: str = "",
+    attempts: int = 0,
+    failure_stage: str = "",
+    failure_reason: str = "",
+    apply_error: str = "",
+    ingestion_error: str = "",
+) -> dict:
+    """Build one JSONL prediction row with benchmark-compatible core fields."""
+    return {
+        "instance_id": instance_id,
+        "model_patch": model_patch,
+        "model_name_or_path": f"graphrag-reflexion-{configs.LLM_MODEL}",
+        "repo": repo_name,
+        "base_commit": base_commit,
+        "project_id": project_id,
+        "selected_file": to_posix_path(selected_file) if selected_file else "",
+        "attempted_files": [to_posix_path(f) for f in (attempted_files or [])],
+        "fault_description": fault_description[:500],
+        "attempts": attempts,
+        "status": "patched" if model_patch else "failed",
+        "failure_stage": failure_stage,
+        "failure_reason": failure_reason[:1000],
+        "apply_error": apply_error[:1000],
+        "ingestion_error": ingestion_error[:1000],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -127,81 +188,111 @@ Repository: {repo_name}
 ## Repository file structure (source files only):
 {file_tree}
 
-Based on the issue description and code search results, which single file needs to be modified?
-Return ONLY the file path, nothing else. Example: django/forms/widgets.py"""
+Based on the issue description and code search results, which files are most likely to need modification?
+Return up to {return_files} file paths, one per line, ranked by likelihood.
+Return ONLY file paths, no explanation. Example:
+django/forms/widgets.py
+django/forms/fields.py"""
 
 
-def phase1_localize_file(
+def phase1_localize_files(
     llm,
     issue_text: str,
     repo_name: str,
     repo_dir: Path,
     neo4j_session,
     project_id: str,
-) -> str:
-    """Phase 1: Find which file to edit."""
+) -> list[str]:
+    """Phase 1: Find likely files to edit, ranked by likelihood."""
 
-    # BM25 search for candidate files
-    seeds = bm25_search(neo4j_session, issue_text[:1000], project_id, top_k=20)
-    candidate_files = []
-    seen_files = set()
+    # BM25 search over code nodes, then aggregate scores per file.
+    seeds = bm25_search(
+        neo4j_session,
+        issue_text[:2000],
+        project_id,
+        top_k=PHASE1_BM25_TOP_K,
+    )
+    file_scores: dict[str, float] = {}
+    file_hits: dict[str, list[str]] = {}
     for s in seeds:
-        fp = s.get("file_path", "")
-        if fp and fp not in seen_files:
-            seen_files.add(fp)
-            candidate_files.append(f"  - {fp} ({s.get('type','')}: {s.get('name','')})")
+        fp = to_posix_path(s.get("file_path", ""))
+        if not fp:
+            continue
+        score = float(s.get("score") or 0.0)
+        file_scores[fp] = file_scores.get(fp, 0.0) + score
+        hit_name = s.get("qualified_name") or s.get("name") or ""
+        hit_type = s.get("type") or "CodeNode"
+        if hit_name:
+            file_hits.setdefault(fp, []).append(f"{hit_type}: {hit_name}")
+
+    ranked_files = sorted(file_scores, key=file_scores.get, reverse=True)
+    candidate_files = []
+    for fp in ranked_files[:PHASE1_CANDIDATE_FILES]:
+        hits = "; ".join(file_hits.get(fp, [])[:3])
+        if hits:
+            candidate_files.append(f"  - {fp} (score={file_scores[fp]:.2f}; hits: {hits})")
+        else:
+            candidate_files.append(f"  - {fp} (score={file_scores[fp]:.2f})")
 
     # Get repo file tree (source files only, skip tests)
     file_tree = []
     for f in sorted(repo_dir.rglob("*.py")):
         if "__pycache__" in str(f) or "/.git/" in str(f):
             continue
-        rel = str(f.relative_to(repo_dir))
+        rel = f.relative_to(repo_dir).as_posix()
         if not rel.startswith("test") and "/tests/" not in rel and not f.name.startswith("test_"):
             file_tree.append(f"  {rel}")
 
-    # Cap file tree at 200 lines
-    tree_str = "\n".join(file_tree[:200])
-    if len(file_tree) > 200:
-        tree_str += f"\n  ... ({len(file_tree) - 200} more files)"
+    tree_str = "\n".join(file_tree[:PHASE1_FILE_TREE_LIMIT])
+    if len(file_tree) > PHASE1_FILE_TREE_LIMIT:
+        tree_str += f"\n  ... ({len(file_tree) - PHASE1_FILE_TREE_LIMIT} more files)"
 
     prompt = PHASE1_PROMPT.format(
         issue_text=issue_text[:2000],
         repo_name=repo_name,
-        candidate_files="\n".join(candidate_files[:15]) if candidate_files else "  (no candidates found)",
+        candidate_files="\n".join(candidate_files) if candidate_files else "  (no candidates found)",
         file_tree=tree_str,
+        return_files=PHASE1_RETURN_FILES,
     )
 
     try:
         response = llm.invoke(prompt)
-        file_path = _extract_file_path(response.content, repo_dir)
-        return file_path
+        file_paths = _extract_file_paths(response.content, repo_dir)
+        if file_paths:
+            return file_paths[:PHASE1_RETURN_FILES]
     except Exception as e:
         print(f"    Phase 1 error: {e}")
-        # Fallback: use top BM25 result
-        if seeds:
-            return seeds[0].get("file_path", "")
-        return ""
+    # Fallback: use top ranked files from BM25 aggregation.
+    return ranked_files[:PHASE1_RETURN_FILES]
 
 
-def _extract_file_path(response: str, repo_dir: Path) -> str:
-    """Extract a valid file path from LLM response."""
+def _extract_file_paths(response: str, repo_dir: Path) -> list[str]:
+    """Extract valid repo-relative Python paths from an LLM response."""
     response = response.strip()
+    paths: list[str] = []
+    seen: set[str] = set()
+
+    def _add_path(raw_path: str) -> None:
+        path = to_posix_path(raw_path.strip().strip("`").strip("*").strip())
+        if not path.endswith(".py"):
+            return
+        if path in seen:
+            return
+        if (repo_dir / path).exists():
+            seen.add(path)
+            paths.append(path)
+
     # Try each line
     for line in response.split("\n"):
         line = line.strip().strip("`").strip("*").strip()
         if line.endswith(".py"):
             # Remove common prefixes
             line = re.sub(r'^(Answer:|File:|Path:|>\s*)', '', line).strip()
-            # Verify it exists
-            if (repo_dir / line).exists():
-                return line
+            _add_path(line)
     # Try to find any .py path in the response
-    paths = re.findall(r'[\w/]+\.py', response)
-    for p in paths:
-        if (repo_dir / p).exists():
-            return p
-    return ""
+    for p in re.findall(r'[\w/\\.-]+\.py', response):
+        _add_path(p)
+    return paths
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +338,7 @@ def phase2_localize_fault(
     project_id: str,
 ) -> tuple[str, str]:
     """Phase 2: Find the buggy function/line within the file. Returns (fault_description, file_content)."""
+    file_path = to_posix_path(file_path)
 
     # Read file content
     full_path = repo_dir / file_path
@@ -364,6 +456,8 @@ Rules:
 - Include the full diff header (--- a/... +++ b/...)
 - Include correct @@ line numbers
 - Include 3 lines of context around each change
+- The source code above may be a focused excerpt; generate the diff against the full target file
+- Do not copy artificial excerpt comments or line-number prefixes into the patch
 
 Respond ONLY with a ```diff ... ``` block. No explanation.
 """
@@ -396,9 +490,50 @@ Rules:
 - Include the full diff header (--- a/... +++ b/...)
 - Include correct @@ line numbers
 - Include 3 lines of context around each change
+- The source code above may be a focused excerpt; generate the diff against the full target file
+- Do not copy artificial excerpt comments or line-number prefixes into the patch
 
 Respond ONLY with a ```diff ... ``` block. No explanation.
 """
+
+
+def _extract_fault_line(fault_description: str) -> int | None:
+    match = re.search(r"\bline\s+(\d+)\b", fault_description, re.IGNORECASE)
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
+def _focused_file_context(
+    file_content: str,
+    fault_description: str,
+    full_file_limit: int = 12000,
+    window: int = 150,
+) -> str:
+    if len(file_content) <= full_file_limit:
+        return file_content
+
+    fault_line = _extract_fault_line(fault_description)
+    if not fault_line:
+        return file_content[:full_file_limit] + "\n ... (truncated)"
+
+    lines = file_content.splitlines()
+    if not lines:
+        return file_content
+
+    center = max(1, min(fault_line, len(lines)))
+    start = max(1, center - window)
+    end = min(len(lines), center + window)
+    snippet = "\n".join(lines[start - 1:end])
+    return (
+        f"# Focused excerpt from full file: lines {start}-{end} of {len(lines)} "
+        f"(suspected bug line {center}).\n"
+        f"# Generate the unified diff against the full file path, not a new excerpt file.\n"
+        f"{snippet}"
+    )
 
 
 def phase3_generate_patch(
@@ -411,13 +546,9 @@ def phase3_generate_patch(
     failed_patch: str = "",
 ) -> str:
     """Phase 3: Generate the actual patch. Accepts optional reflection for retry attempts."""
+    file_path = to_posix_path(file_path)
 
-    # ACI: add line numbers so patch @@ line numbers are accurate
-    lines = file_content.split("\n")
-    numbered_lines = [f"{i+1:4d} | {l}" for i, l in enumerate(lines)]
-    content_for_prompt = "\n".join(numbered_lines)
-    if len(content_for_prompt) > 10000:
-        content_for_prompt = content_for_prompt[:10000] + "\n ... (truncated)"
+    content_for_prompt = _focused_file_context(file_content, fault_description)
 
     if reflection and failed_patch:
         # Retry with reflection context
@@ -451,6 +582,7 @@ def phase3_generate_patch(
 # ---------------------------------------------------------------------------
 def _extract_and_clean_diff(text: str, expected_file: str) -> str:
     """Extract diff from LLM response and fix common issues."""
+    expected_file = to_posix_path(expected_file)
     # Extract diff block
     diff = ""
     if "```diff" in text:
@@ -515,6 +647,94 @@ def _extract_and_clean_diff(text: str, expected_file: str) -> str:
     return result
 
 
+def _is_comment_like(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return True
+
+    lowered = stripped.lower()
+    docstring_prefixes = (
+        '"""', "'''",
+        'r"""', "r'''",
+        'u"""', "u'''",
+        'f"""', "f'''",
+        'b"""', "b'''",
+        'fr"""', "fr'''",
+        'rf"""', "rf'''",
+    )
+    return any(lowered.startswith(prefix) for prefix in docstring_prefixes)
+
+
+def _assess_patch_quality(patch: str, expected_file: str) -> tuple[bool, str]:
+    """Reject obvious low-quality diffs before spending an attempt on apply."""
+    expected_file = to_posix_path(expected_file)
+    if not patch or not patch.strip():
+        return False, "Empty patch"
+
+    lines = patch.splitlines()
+    old_headers = [
+        to_posix_path(line[6:].strip()) for line in lines if line.startswith("--- a/")
+    ]
+    new_headers = [
+        to_posix_path(line[6:].strip()) for line in lines if line.startswith("+++ b/")
+    ]
+    hunk_count = sum(1 for line in lines if line.startswith("@@"))
+
+    if len(old_headers) != 1 or len(new_headers) != 1:
+        return False, "Patch must modify exactly one file"
+    if old_headers[0] != expected_file or new_headers[0] != expected_file:
+        touched_file = new_headers[0] if new_headers else old_headers[0]
+        return False, f"Patch modifies {touched_file}, expected {expected_file}"
+    if hunk_count == 0:
+        return False, "Patch has no unified-diff hunk"
+
+    deleted: list[str] = []
+    added: list[str] = []
+    in_hunk = False
+    for line in lines:
+        if line.startswith("@@"):
+            in_hunk = True
+            continue
+        if not in_hunk:
+            continue
+        if line.startswith("-") and not line.startswith("---"):
+            deleted.append(line[1:])
+        elif line.startswith("+") and not line.startswith("+++"):
+            added.append(line[1:])
+
+    if not deleted and not added:
+        return False, "Patch has no changed lines"
+
+    changed = deleted + added
+    if any(re.match(r"^\s*\d+\s*\|", line) for line in changed):
+        return False, "Patch contains prompt line-number prefixes"
+
+    old_semantic = [line.strip() for line in deleted if line.strip()]
+    new_semantic = [line.strip() for line in added if line.strip()]
+    if old_semantic == new_semantic:
+        return False, "Patch is a no-op after whitespace normalization"
+
+    changed_nonblank = [line for line in changed if line.strip()]
+    if changed_nonblank and all(_is_comment_like(line) for line in changed_nonblank):
+        return False, "Patch only changes comments or docstrings"
+
+    statement_start = re.compile(
+        r"^(def|class|if|elif|for|while|except|with|return|raise|from|import|"
+        r"pass|break|continue|yield|assert)\b|^(else|try|finally):"
+    )
+    for line in added:
+        if not line.startswith(" "):
+            continue
+        stripped = line.lstrip(" ")
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(stripped)
+        if indent % 4 != 0 and statement_start.match(stripped):
+            return False, f"Suspicious indentation on added line: {stripped[:80]}"
+
+    return True, ""
+
+
 # ---------------------------------------------------------------------------
 # Patch normalization — rebuild correct line numbers from actual file
 # ---------------------------------------------------------------------------
@@ -533,7 +753,7 @@ def _normalize_patch(patch: str, repo_dir: Path) -> str:
     file_path = None
     for line in patch.split("\n"):
         if line.startswith("+++ b/"):
-            file_path = line[6:].strip()
+            file_path = to_posix_path(line[6:].strip())
             break
     if not file_path:
         return patch
@@ -654,16 +874,18 @@ def _verify_patch_applies(patch: str, repo_dir: Path) -> tuple[bool, str]:
         if result.returncode == 0:
             return True, ""
 
-        # Fallback: patch -p1 with fuzzy matching (tolerates minor context mismatches)
-        result2 = subprocess.run(
-            ["patch", "-p1", "--dry-run", "--fuzz=3", "-i", patch_file],
-            cwd=repo_dir,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result2.returncode == 0:
-            return True, ""
+        # Fallback: patch -p1 with fuzzy matching if GNU patch is available.
+        # On Windows, missing `patch` raises WinError 2 and hides git's real error.
+        if shutil.which("patch"):
+            result2 = subprocess.run(
+                ["patch", "-p1", "--dry-run", "--fuzz=3", "-i", patch_file],
+                cwd=repo_dir,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if result2.returncode == 0:
+                return True, ""
 
         # Return the git apply error (more descriptive)
         return False, result.stderr.strip()
@@ -675,6 +897,7 @@ def _verify_patch_applies(patch: str, repo_dir: Path) -> tuple[bool, str]:
 
 def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str) -> str:
     """Get a concise graph context string for the reflector."""
+    file_path = to_posix_path(file_path)
     try:
         results = neo4j_session.run("""
             MATCH (n:CodeNode {file_path: $fp, project_id: $pid})
@@ -698,6 +921,173 @@ def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str) 
         return "Graph unavailable."
 
 
+def _try_patch_for_file(
+    *,
+    llm,
+    issue_text: str,
+    file_path: str,
+    repo_dir: Path,
+    neo4j_session,
+    neo4j_driver,
+    project_id: str,
+    reflexion: bool,
+    max_retries: int,
+    file_attempt_index: int,
+) -> dict:
+    file_path = to_posix_path(file_path)
+    max_retries = max(1, max_retries)
+    print(f"  Trying file #{file_attempt_index}: {file_path} (max {max_retries} attempts)")
+
+    fault_desc, file_content = phase2_localize_fault(
+        llm, issue_text, file_path, repo_dir, neo4j_session, project_id
+    )
+    print(f"  P2 Fault: {fault_desc[:80] if fault_desc else '✗'}")
+
+    if not file_content:
+        return {
+            "model_patch": "",
+            "selected_file": file_path,
+            "fault_description": fault_desc,
+            "attempts": 0,
+            "failure_stage": "phase2_no_file_content",
+            "failure_reason": "Phase 2 could not read selected file content",
+            "apply_error": "",
+        }
+
+    graph_context = _get_graph_context_for_file(neo4j_session, file_path, project_id)
+    reflections: list[str] = []
+    patch = ""
+    last_patch = ""
+    last_error = ""
+    failure_stage = ""
+    failure_reason = ""
+    apply_error_message = ""
+    attempts = 0
+
+    for attempt in range(1, max_retries + 1):
+        attempts = attempt
+        if attempt == 1:
+            patch = phase3_generate_patch(
+                llm, issue_text, file_path, fault_desc, file_content
+            )
+        else:
+            print(f"  Reflexion attempt {attempt}/{max_retries}...")
+            try:
+                reflection = generate_reflection(
+                    llm=llm,
+                    bug_description=f"{issue_text[:500]}\n\nFault: {fault_desc}",
+                    failed_patch=last_patch,
+                    test_output=last_error,
+                    graph_context=graph_context,
+                    previous_reflections=reflections,
+                )
+                reflections.append(reflection)
+                print(f"    Reflection: {reflection[:100]}...")
+            except Exception as e:
+                print(f"    Reflection error: {e}")
+                reflection = f"Previous patch failed to apply: {last_error}"
+                reflections.append(reflection)
+
+            patch = phase3_generate_patch(
+                llm, issue_text, file_path, fault_desc, file_content,
+                reflection=reflection,
+                failed_patch=last_patch,
+            )
+
+        if not patch:
+            print(f"  P3 Patch: ✗ (empty, attempt {attempt})")
+            last_error = "Patch generation produced empty output"
+            failure_stage = "patch_empty"
+            failure_reason = last_error
+            last_patch = ""
+            continue
+
+        normalized = _normalize_patch(patch, repo_dir)
+        if normalized != patch:
+            print("  Patch normalized (line numbers corrected)")
+
+        quality_ok, quality_error = _assess_patch_quality(normalized, file_path)
+        if not quality_ok:
+            print(f"  P3 Patch: ✗ quality failed (attempt {attempt}): {quality_error}")
+            last_patch = normalized
+            last_error = f"Patch quality failed: {quality_error}"
+            failure_stage = "patch_quality_failed"
+            failure_reason = quality_error
+            patch = ""
+            continue
+
+        applies_ok, apply_error = _verify_patch_applies(normalized, repo_dir)
+
+        if applies_ok:
+            patch = normalized
+
+            if reflexion:
+                try:
+                    from api.agent.evaluator import evaluate_patch
+                    eval_score, eval_reason = evaluate_patch(
+                        bug_description=f"{issue_text[:300]}\nFault: {fault_desc}",
+                        patch=patch,
+                    )
+                    print(f"  Evaluator: {eval_score}/5 — {eval_reason}")
+                    if eval_score < 3:
+                        print(f"  Evaluator rejected patch (score {eval_score})")
+                        last_patch = patch
+                        last_error = f"Evaluator feedback: {eval_reason}"
+                        failure_stage = "evaluator_rejected"
+                        failure_reason = eval_reason
+                        patch = ""
+                        if attempt < max_retries:
+                            continue
+                        break
+                except Exception:
+                    pass
+
+            print(f"  P3 Patch: ✓ {len(patch)} chars (attempt {attempt}, applies cleanly)")
+            return {
+                "model_patch": patch,
+                "selected_file": file_path,
+                "fault_description": fault_desc,
+                "attempts": attempts,
+                "failure_stage": "",
+                "failure_reason": "",
+                "apply_error": "",
+            }
+
+        print(f"  P3 Patch: ✗ apply failed (attempt {attempt}): {apply_error[:80]}")
+        patch_preview = "\n".join(normalized.split("\n")[:10])
+        print(f"  Patch preview:\n{patch_preview}")
+
+        if last_patch and len(patch) < len(last_patch) * 0.6:
+            print("  Frustration detected (patch shrinking) — widening context")
+            try:
+                with neo4j_driver.session() as s:
+                    extra = _get_graph_context_for_file(s, file_path, project_id)
+                graph_context = extra + "\n" + graph_context
+            except Exception:
+                pass
+
+        last_patch = normalized
+        last_error = f"git apply --check failed: {apply_error}"
+        failure_stage = "patch_apply_failed"
+        failure_reason = apply_error
+        apply_error_message = apply_error
+        patch = ""
+
+    if not failure_stage:
+        failure_stage = "patch_not_generated"
+        failure_reason = last_error or "Patch loop ended without an accepted patch"
+
+    return {
+        "model_patch": "",
+        "selected_file": file_path,
+        "fault_description": fault_desc,
+        "attempts": attempts,
+        "failure_stage": failure_stage,
+        "failure_reason": failure_reason,
+        "apply_error": apply_error_message,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Main task runner
 # ---------------------------------------------------------------------------
@@ -716,7 +1106,9 @@ def run_single_task(
     if hints:
         issue_text += f"\n\nHints:\n{hints}"
 
-    project_id = repo_name.replace("/", "_")
+    project_id = make_project_id(repo_name, base_commit)
+    cache_key = make_ingestion_cache_key(repo_name, base_commit)
+    ingestion_error = ""
     max_retries = configs.REFLEXION_MAX_RETRIES if reflexion else 1  # 1 = no retries
 
     # Clone + checkout
@@ -724,155 +1116,107 @@ def run_single_task(
     checkout_commit(repo_dir, base_commit)
 
     # Ingest if needed
-    if not ingestion_cache.get(project_id, {}).get("ingested"):
-        print(f"  Ingesting {repo_name}...")
+    if not ingestion_cache.get(cache_key, {}).get("ingested"):
+        print(f"  Ingesting {repo_name}@{base_commit[:12]}...")
         try:
             stats = ingest_repo_to_neo4j(
                 repo_dir, project_id,
                 NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD,
-                max_files=500,
+                max_files=1000,
             )
-            ingestion_cache[project_id] = {"ingested": True, **stats}
+            ingestion_cache[cache_key] = {
+                "ingested": True,
+                "repo": repo_name,
+                "base_commit": base_commit,
+                "project_id": project_id,
+                **stats,
+            }
             save_ingestion_cache(ingestion_cache)
         except Exception as e:
+            ingestion_error = str(e)
             print(f"  Ingestion failed: {e}")
 
-    patch = ""
     with neo4j_driver.session() as session:
-        # Phase 1: File Localization (run once)
-        file_path = phase1_localize_file(
+        file_candidates = phase1_localize_files(
             llm, issue_text, repo_name, repo_dir, session, project_id
         )
-        print(f"  P1 File: {file_path or '✗'}")
+        file_candidates = [to_posix_path(f) for f in file_candidates if f]
+        print(f"  P1 Files: {', '.join(file_candidates) if file_candidates else '✗'}")
 
-        if not file_path:
-            return {
-                "instance_id": instance_id,
-                "model_patch": "",
-                "model_name_or_path": f"graphrag-reflexion-{configs.LLM_MODEL}",
-            }
+        if not file_candidates:
+            return make_prediction(
+                instance_id=instance_id,
+                repo_name=repo_name,
+                base_commit=base_commit,
+                project_id=project_id,
+                attempted_files=[],
+                failure_stage="phase1_no_file",
+                failure_reason="Phase 1 did not return an existing Python file",
+                ingestion_error=ingestion_error,
+            )
 
-        # Phase 2: Fault Localization (run once)
-        fault_desc, file_content = phase2_localize_fault(
-            llm, issue_text, file_path, repo_dir, session, project_id
+        attempted_files: list[str] = []
+        total_attempts = 0
+        last_result: dict | None = None
+
+        for file_index, file_path in enumerate(file_candidates, 1):
+            attempted_files.append(file_path)
+            file_max_retries = max_retries if file_index == 1 else ALT_FILE_MAX_RETRIES
+            if not reflexion:
+                file_max_retries = 1
+
+            result = _try_patch_for_file(
+                llm=llm,
+                issue_text=issue_text,
+                file_path=file_path,
+                repo_dir=repo_dir,
+                neo4j_session=session,
+                neo4j_driver=neo4j_driver,
+                project_id=project_id,
+                reflexion=reflexion,
+                max_retries=file_max_retries,
+                file_attempt_index=file_index,
+            )
+            last_result = result
+            total_attempts += int(result.get("attempts") or 0)
+
+            if result.get("model_patch"):
+                return make_prediction(
+                    instance_id=instance_id,
+                    repo_name=repo_name,
+                    base_commit=base_commit,
+                    project_id=project_id,
+                    model_patch=result["model_patch"],
+                    selected_file=result.get("selected_file", file_path),
+                    attempted_files=attempted_files,
+                    fault_description=result.get("fault_description", ""),
+                    attempts=total_attempts,
+                    ingestion_error=ingestion_error,
+                )
+
+            print(
+                f"  File #{file_index} failed: "
+                f"{result.get('failure_stage') or 'unknown'} — "
+                f"{str(result.get('failure_reason') or '')[:120]}"
+            )
+
+        last_result = last_result or {}
+        return make_prediction(
+            instance_id=instance_id,
+            repo_name=repo_name,
+            base_commit=base_commit,
+            project_id=project_id,
+            selected_file=last_result.get("selected_file", attempted_files[-1]),
+            attempted_files=attempted_files,
+            fault_description=last_result.get("fault_description", ""),
+            attempts=total_attempts,
+            failure_stage=last_result.get("failure_stage") or "patch_not_generated",
+            failure_reason=last_result.get("failure_reason") or (
+                "All candidate files failed to produce an accepted patch"
+            ),
+            apply_error=last_result.get("apply_error", ""),
+            ingestion_error=ingestion_error,
         )
-        print(f"  P2 Fault: {fault_desc[:80] if fault_desc else '✗'}")
-
-        if not file_content:
-            return {
-                "instance_id": instance_id,
-                "model_patch": "",
-                "model_name_or_path": f"graphrag-reflexion-{configs.LLM_MODEL}",
-            }
-
-        # Graph context for reflector (reuse across retries)
-        graph_context = _get_graph_context_for_file(session, file_path, project_id)
-
-        # Phase 3 + Reflexion loop
-        reflections: list[str] = []
-        last_patch = ""
-        last_error = ""
-
-        for attempt in range(1, max_retries + 1):
-            # Generate patch (first attempt = fresh, retries = with reflection)
-            if attempt == 1:
-                patch = phase3_generate_patch(
-                    llm, issue_text, file_path, fault_desc, file_content
-                )
-            else:
-                # Generate reflection on the previous failure
-                print(f"  Reflexion attempt {attempt}/{max_retries}...")
-                try:
-                    reflection = generate_reflection(
-                        llm=llm,
-                        bug_description=f"{issue_text[:500]}\n\nFault: {fault_desc}",
-                        failed_patch=last_patch,
-                        test_output=last_error,
-                        graph_context=graph_context,
-                        previous_reflections=reflections,
-                    )
-                    reflections.append(reflection)
-                    print(f"    Reflection: {reflection[:100]}...")
-                except Exception as e:
-                    print(f"    Reflection error: {e}")
-                    reflection = f"Previous patch failed to apply: {last_error}"
-                    reflections.append(reflection)
-
-                patch = phase3_generate_patch(
-                    llm, issue_text, file_path, fault_desc, file_content,
-                    reflection=reflection,
-                    failed_patch=last_patch,
-                )
-
-            if not patch:
-                print(f"  P3 Patch: ✗ (empty, attempt {attempt})")
-                last_error = "Patch generation produced empty output"
-                last_patch = ""
-                continue
-
-            # Normalize patch: rebuild correct line numbers from actual file
-            normalized = _normalize_patch(patch, repo_dir)
-            if normalized != patch:
-                print(f"  Patch normalized (line numbers corrected)")
-
-            # Verify the patch applies cleanly
-            applies_ok, apply_error = _verify_patch_applies(normalized, repo_dir)
-
-            if applies_ok:
-                patch = normalized  # save the clean version
-
-                # ── Harness: Evaluator ──────────────────────────────────────
-                # A second LLM independently scores patch quality (1-5).
-                # Score < 3 → reject and trigger another reflexion attempt.
-                # This implements Planner → Generator → Evaluator pipeline.
-                if reflexion:
-                    try:
-                        from api.agent.evaluator import evaluate_patch
-                        eval_score, eval_reason = evaluate_patch(
-                            bug_description=f"{issue_text[:300]}\nFault: {fault_desc}",
-                            patch=patch,
-                        )
-                        print(f"  Evaluator: {eval_score}/5 — {eval_reason}")
-                        if eval_score < 3 and attempt < max_retries:
-                            # Frustration signal: patch applies but evaluator rejects it
-                            print(f"  Evaluator rejected patch (score {eval_score}) — retrying")
-                            last_patch = patch
-                            last_error = f"Evaluator feedback: {eval_reason}"
-                            patch = ""
-                            continue
-                    except Exception:
-                        pass  # evaluator is optional — never block on it
-                # ── End Evaluator ───────────────────────────────────────────
-
-                print(f"  P3 Patch: ✓ {len(patch)} chars (attempt {attempt}, applies cleanly)")
-                break  # ← success, exit reflexion loop
-            else:
-                print(f"  P3 Patch: ✗ apply failed (attempt {attempt}): {apply_error[:80]}")
-                patch_preview = "\n".join(normalized.split("\n")[:10])
-                print(f"  Patch preview:\n{patch_preview}")
-
-                # ── Harness: Frustration detection ─────────────────────────
-                # If patches are shrinking across attempts, the agent is confused.
-                # Widen the graph context to give it more signal.
-                if last_patch and len(patch) < len(last_patch) * 0.6:
-                    print(f"  Frustration detected (patch shrinking) — widening context")
-                    try:
-                        with neo4j_driver.session() as s:
-                            extra = _get_graph_context_for_file(s, file_path, project_id)
-                        graph_context = extra + "\n" + graph_context
-                    except Exception:
-                        pass
-                # ── End Frustration detection ───────────────────────────────
-
-                last_patch = patch
-                last_error = f"git apply --check failed: {apply_error}"
-                patch = ""  # don't save a broken patch
-
-    return {
-        "instance_id": instance_id,
-        "model_patch": patch,
-        "model_name_or_path": f"graphrag-reflexion-{configs.LLM_MODEL}",
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -935,7 +1279,11 @@ def main():
     ingestion_cache = load_ingestion_cache()
     predictions = list(existing)
     start = time.time()
-    errors = 0
+    failure_counts = Counter(
+        p.get("failure_stage") or "unknown_failure"
+        for p in predictions
+        if not p.get("model_patch")
+    )
 
     for i, task in enumerate(tasks):
         t0 = time.time()
@@ -945,15 +1293,19 @@ def main():
             pred = run_single_task(task, llm, neo4j_driver, ingestion_cache, reflexion=use_reflexion)
             predictions.append(pred)
             if not pred["model_patch"]:
-                errors += 1
+                failure_counts[pred.get("failure_stage") or "unknown_failure"] += 1
         except Exception as e:
             print(f"  ERROR: {e}")
-            predictions.append({
-                "instance_id": task["instance_id"],
-                "model_patch": "",
-                "model_name_or_path": f"graphrag-reflexion-{configs.LLM_MODEL}",
-            })
-            errors += 1
+            pred = make_prediction(
+                instance_id=task["instance_id"],
+                repo_name=task["repo"],
+                base_commit=task["base_commit"],
+                project_id=make_project_id(task["repo"], task["base_commit"]),
+                failure_stage="exception",
+                failure_reason=str(e),
+            )
+            predictions.append(pred)
+            failure_counts["exception"] += 1
 
         print(f"  ({time.time()-t0:.1f}s)")
 
@@ -965,7 +1317,14 @@ def main():
         if (i + 1) % 10 == 0:
             elapsed = time.time() - start
             patched = sum(1 for p in predictions if p["model_patch"])
-            print(f"\n  ── {patched}/{i+1+len(done_ids)} patched | {errors} errors ──")
+            failures = sum(failure_counts.values())
+            top_failures = ", ".join(
+                f"{stage}:{count}" for stage, count in failure_counts.most_common(3)
+            ) or "none"
+            print(
+                f"\n  ── {patched}/{i+1+len(done_ids)} patched | "
+                f"{failures} failed | {top_failures} ──"
+            )
 
     neo4j_driver.close()
     elapsed = time.time() - start
@@ -975,6 +1334,11 @@ def main():
     print(f"\n{'='*60}")
     print(f"DONE: {total} tasks in {elapsed/60:.1f}min")
     print(f"Patches: {patched}/{total} ({100*patched/total:.1f}%)")
+    failures = total - patched
+    if failures:
+        print("Failure stages:")
+        for stage, count in failure_counts.most_common():
+            print(f"  {stage}: {count}")
 
     # Compare file targeting with gold
     tasks_map = {t["instance_id"]: t for t in json.loads(Path(CACHED_TASKS_PATH).read_text())}

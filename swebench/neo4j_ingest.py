@@ -21,6 +21,74 @@ from typing import Optional
 from neo4j import GraphDatabase
 
 
+DEFAULT_BATCH_SIZE = int(os.getenv("NEO4J_INGEST_BATCH_SIZE", "500"))
+
+
+def _repo_rel_path(path: Path, repo_dir: Path) -> str:
+    """Return a repository-relative path using POSIX separators for diffs/Neo4j."""
+    return path.relative_to(repo_dir).as_posix()
+
+
+def _batched(items: list[dict], batch_size: int = DEFAULT_BATCH_SIZE):
+    for start in range(0, len(items), batch_size):
+        yield items[start:start + batch_size]
+
+
+def _insert_modules(session, modules: list[dict]) -> None:
+    for batch in _batched(modules):
+        result = session.run("""
+            UNWIND $rows AS row
+            MERGE (m:Module {file_path: row.file_path, project_id: row.project_id})
+            SET m.name = row.name,
+                m.content = row.content
+        """, rows=batch)
+        result.consume()
+
+
+def _insert_code_nodes(session, nodes: list[dict]) -> int:
+    total_created = 0
+    for batch in _batched(nodes):
+        result = session.run("""
+            UNWIND $rows AS row
+            MERGE (n:CodeNode {node_id: row.node_id})
+            SET n.type = row.type,
+                n.name = row.name,
+                n.qualified_name = row.qualified_name,
+                n.file_path = row.file_path,
+                n.content = row.content,
+                n.docstring = row.docstring,
+                n.lineno = row.lineno,
+                n.project_id = row.project_id
+            WITH n, row
+            MATCH (m:Module {file_path: row.file_path, project_id: row.project_id})
+            MERGE (m)-[:DEFINES]->(n)
+        """, rows=batch)
+        summary = result.consume()
+        total_created += summary.counters.nodes_created
+    return total_created
+
+
+def _insert_calls(session, calls: list[dict]) -> int:
+    total_created = 0
+    for batch in _batched(calls, batch_size=DEFAULT_BATCH_SIZE * 2):
+        result = session.run("""
+            UNWIND $rows AS row
+            MATCH (a:CodeNode {
+                qualified_name: row.caller,
+                project_id: row.project_id
+            })
+            MATCH (b:CodeNode {
+                name: row.callee,
+                project_id: row.project_id
+            })
+            WHERE a <> b
+            MERGE (a)-[:CALLS]->(b)
+        """, rows=batch)
+        summary = result.consume()
+        total_created += summary.counters.relationships_created
+    return total_created
+
+
 # ---------------------------------------------------------------------------
 # AST visitors
 # ---------------------------------------------------------------------------
@@ -150,18 +218,25 @@ def ingest_repo_to_neo4j(
         all_py = list(repo_dir.rglob("*.py"))
         # Exclude pycache and git, but KEEP source files even if near test dirs
         # Only exclude files whose name starts with test_ or ends with _test.py
-        py_files = [
-            f for f in all_py
-            if "__pycache__" not in str(f)
-            and "/.git/" not in str(f)
-            and not f.name.startswith("test_")
-            and not f.name.endswith("_test.py")
-            and "/tests/" not in str(f)
-            and "/test/" not in str(f)
-        ][:max_files]
+        py_files = []
+        for f in all_py:
+            path_text = f.as_posix()
+            if (
+                "__pycache__" in path_text
+                or "/.git/" in path_text
+                or f.name.startswith("test_")
+                or f.name.endswith("_test.py")
+                or "/tests/" in path_text
+                or "/test/" in path_text
+            ):
+                continue
+            py_files.append(f)
+            if len(py_files) >= max_files:
+                break
 
-        total_nodes = 0
-        total_rels = 0
+        modules: list[dict] = []
+        nodes: list[dict] = []
+        calls: list[dict] = []
         file_count = 0
 
         for fpath in py_files:
@@ -170,15 +245,14 @@ def ingest_repo_to_neo4j(
                 if len(source) > 100_000:
                     source = source[:100_000]  # cap large files
 
-                rel_path = str(fpath.relative_to(repo_dir))
+                rel_path = _repo_rel_path(fpath, repo_dir)
 
-                # Create Module node
-                session.run("""
-                    MERGE (m:Module {file_path: $fp, project_id: $pid})
-                    SET m.name = $name, m.content = $content
-                """, fp=rel_path, pid=project_id,
-                    name=fpath.stem,
-                    content=source[:500])
+                modules.append({
+                    "file_path": rel_path,
+                    "project_id": project_id,
+                    "name": fpath.stem,
+                    "content": source[:500],
+                })
 
                 # Parse AST
                 try:
@@ -194,44 +268,34 @@ def ingest_repo_to_neo4j(
                     node_id = hashlib.md5(
                         f"{project_id}:{rel_path}:{node_data['qualified_name']}".encode()
                     ).hexdigest()
-
-                    session.run(f"""
-                        MERGE (n:CodeNode {{node_id: $nid}})
-                        SET n.type = $type,
-                            n.name = $name,
-                            n.qualified_name = $qname,
-                            n.file_path = $fp,
-                            n.content = $content,
-                            n.docstring = $doc,
-                            n.lineno = $lineno,
-                            n.project_id = $pid
-                        WITH n
-                        MATCH (m:Module {{file_path: $fp, project_id: $pid}})
-                        MERGE (m)-[:DEFINES]->(n)
-                    """, nid=node_id, type=node_data["type"],
-                        name=node_data["name"],
-                        qname=node_data["qualified_name"],
-                        fp=rel_path,
-                        content=node_data["content"],
-                        doc=node_data["docstring"],
-                        lineno=node_data["lineno"],
-                        pid=project_id)
-                    total_nodes += 1
+                    nodes.append({
+                        "node_id": node_id,
+                        "type": node_data["type"],
+                        "name": node_data["name"],
+                        "qualified_name": node_data["qualified_name"],
+                        "file_path": rel_path,
+                        "content": node_data["content"],
+                        "docstring": node_data["docstring"],
+                        "lineno": node_data["lineno"],
+                        "project_id": project_id,
+                    })
 
                 # Ingest call relationships (best-effort name matching)
                 for caller, callee in visitor.calls[:50]:  # cap per file
-                    session.run("""
-                        MATCH (a:CodeNode {qualified_name: $caller, project_id: $pid})
-                        MATCH (b:CodeNode {name: $callee, project_id: $pid})
-                        WHERE a <> b
-                        MERGE (a)-[:CALLS]->(b)
-                    """, caller=caller, callee=callee, pid=project_id)
-                    total_rels += 1
+                    calls.append({
+                        "caller": caller,
+                        "callee": callee,
+                        "project_id": project_id,
+                    })
 
                 file_count += 1
 
             except Exception as e:
                 continue
+
+        _insert_modules(session, modules)
+        total_nodes = _insert_code_nodes(session, nodes)
+        total_rels = _insert_calls(session, calls)
 
         print(f"  Ingested: {file_count} files, {total_nodes} nodes, {total_rels} call relationships")
 
@@ -241,6 +305,15 @@ def ingest_repo_to_neo4j(
 
 def _ensure_indexes(session):
     """Create full-text BM25 index and constraints if not present."""
+    try:
+        session.run("""
+            CREATE CONSTRAINT codeNodeId IF NOT EXISTS
+            FOR (n:CodeNode)
+            REQUIRE n.node_id IS UNIQUE
+        """)
+    except Exception:
+        pass
+
     # Full-text index for BM25 search (Phase 1)
     try:
         session.run("""
@@ -257,6 +330,42 @@ def _ensure_indexes(session):
             CREATE FULLTEXT INDEX moduleSearch IF NOT EXISTS
             FOR (m:Module)
             ON EACH [m.name, m.content, m.file_path]
+        """)
+    except Exception:
+        pass
+
+    try:
+        session.run("""
+            CREATE INDEX codeNodeQualified IF NOT EXISTS
+            FOR (n:CodeNode)
+            ON (n.project_id, n.qualified_name)
+        """)
+    except Exception:
+        pass
+
+    try:
+        session.run("""
+            CREATE INDEX codeNodeName IF NOT EXISTS
+            FOR (n:CodeNode)
+            ON (n.project_id, n.name)
+        """)
+    except Exception:
+        pass
+
+    try:
+        session.run("""
+            CREATE INDEX codeNodeFilePath IF NOT EXISTS
+            FOR (n:CodeNode)
+            ON (n.project_id, n.file_path)
+        """)
+    except Exception:
+        pass
+
+    try:
+        session.run("""
+            CREATE INDEX moduleFilePath IF NOT EXISTS
+            FOR (m:Module)
+            ON (m.project_id, m.file_path)
         """)
     except Exception:
         pass
