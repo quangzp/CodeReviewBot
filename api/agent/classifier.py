@@ -38,7 +38,12 @@ The bot has EXACTLY these capabilities:
 Classify the user message into ONE of:
 - IN_SCOPE   : clearly relates to one of the 6 capabilities above
 - OUT_SCOPE  : general programming questions, explanations, small talk, anything else
-- CLARIFY    : relates to the capabilities but is missing required info
+- CLARIFY    : relates to the capabilities but is missing required info AND cannot be inferred from context
+
+IMPORTANT: If recent conversation provides context (e.g. a project was just added or a review
+was just started), short follow-up questions like "Is it done?", "What's the status?",
+"How's it going?", "Done yet?", "Is it ready?" are IN_SCOPE — the agent can infer the subject
+from history. Only mark CLARIFY if context genuinely does NOT provide the missing information.
 
 Reply with ONLY a JSON object, nothing else:
 - In scope: {"intent": "IN_SCOPE"}
@@ -57,10 +62,14 @@ Examples:
 "What is GraphRAG?"                                    -> OUT_SCOPE
 "How do I write a binary search?"                      -> OUT_SCOPE
 "Tell me a joke"                                       -> OUT_SCOPE
-"Fix the bug"                              -> CLARIFY (missing: repo name and bug description)
-"Review the PR"                            -> CLARIFY (missing: PR URL or PR number and repo name)
-"Refactor the code"                        -> CLARIFY (missing: repo name and what to refactor)
+"Fix the bug"  (no prior context)      -> CLARIFY (missing: repo name and bug description)
+"Review the PR" (no prior context)     -> CLARIFY (missing: PR URL or PR number and repo name)
+"Refactor the code" (no prior context) -> CLARIFY (missing: repo name and what to refactor)
+"Is it done?" (after adding a project) -> IN_SCOPE  (subject clear from context)
+"How's it going?" (during indexing)    -> IN_SCOPE  (subject clear from context)
+"Done yet?" (after review started)     -> IN_SCOPE  (subject clear from context)
 
+REPLACE_CONTEXT
 User message: REPLACE_MESSAGE"""
 
 
@@ -75,16 +84,38 @@ OUT_SCOPE_REPLY = (
 )
 
 
-def classify(message: str) -> tuple[Intent, str]:
+def classify(message: str, history: list[dict] | None = None) -> tuple[Intent, str]:
     """
     Classify user intent using llama-3.1-8b-instant (fast, free).
+
+    Accepts optional history (last N turns) so short follow-ups like
+    "Is it done?" are resolved as IN_SCOPE when context makes the
+    subject obvious.
 
     Returns (intent, clarification_hint).
     clarification_hint is non-empty only when intent == CLARIFY.
     """
     try:
         from langchain_core.messages import HumanMessage
-        prompt = CLASSIFIER_PROMPT_TEMPLATE.replace("REPLACE_MESSAGE", message[:500])
+
+        # Build a short context block from the last 3 turns so the classifier
+        # can resolve ambiguous follow-ups without needing the full history.
+        context_block = ""
+        if history:
+            recent = history[-6:]  # last 3 user+assistant pairs at most
+            lines = ["Recent conversation:"]
+            for turn in recent:
+                role = turn.get("role", "user")
+                content = str(turn.get("content", ""))[:200]
+                lines.append(f"[{role}]: {content}")
+            lines.append("")
+            context_block = "\n".join(lines) + "\n"
+
+        prompt = (
+            CLASSIFIER_PROMPT_TEMPLATE
+            .replace("REPLACE_CONTEXT", context_block)
+            .replace("REPLACE_MESSAGE", message[:500])
+        )
         llm = get_llm(role="fast_gate", temperature=0)
         response = llm.invoke([HumanMessage(content=prompt)])
         raw = response.content.strip()

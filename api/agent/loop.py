@@ -187,7 +187,9 @@ async def run_agent_turn(
         loop = asyncio.get_event_loop()
 
         yield {"type": "thinking", "step": 0}
-        intent, missing = await loop.run_in_executor(None, classify, user_message)
+        intent, missing = await loop.run_in_executor(
+            None, lambda: classify(user_message, history=history)
+        )
 
         if intent == Intent.OUT_SCOPE:
             yield {"type": "message", "text": OUT_SCOPE_REPLY}

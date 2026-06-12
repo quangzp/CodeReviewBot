@@ -552,11 +552,13 @@ def phase3_generate_patch(
     file_content: str,
     reflection: str = "",
     failed_patch: str = "",
+    plan_context: str = "",
 ) -> str:
     """Phase 3: Generate the actual patch. Accepts optional reflection for retry attempts."""
     file_path = to_posix_path(file_path)
 
     content_for_prompt = _focused_file_context(file_content, fault_description)
+    plan_section = f"\n## Plan\n{plan_context[:1500]}\n" if plan_context else ""
 
     if reflection and failed_patch:
         # Retry with reflection context
@@ -567,14 +569,14 @@ def phase3_generate_patch(
             failed_patch=failed_patch[:2000],
             reflection=reflection[:1000],
             file_content=content_for_prompt,
-        )
+        ) + plan_section
     else:
         prompt = PHASE3_PROMPT.format(
             issue_text=issue_text[:2000],
             file_path=file_path,
             fault_description=fault_description[:500],
             file_content=content_for_prompt,
-        )
+        ) + plan_section
 
     try:
         response = llm.invoke(prompt)

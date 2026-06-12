@@ -50,11 +50,19 @@ def parse_pr_url(pr_url: str) -> tuple[str, int]:
     return match.group(1), int(match.group(2))
 
 
-def _checkout_pr_base(project_id: str, base_sha: str, review_id: str) -> Path:
+def _checkout_pr_base(
+    project_id: str,
+    base_sha: str,
+    review_id: str,
+    base_ref: str = "",
+) -> Path:
     """
     Create a per-PR working directory by copying the project's clone and
     checking out the PR's base commit there. Doesn't disturb the project's
     main clone (which stays on HEAD of default branch).
+
+    base_ref: branch name on the base repo (e.g. "main"). Used to fetch
+    the commit from GitHub when the local shallow clone doesn't have it.
 
     Returns the path to the per-PR working directory.
     """
@@ -72,34 +80,72 @@ def _checkout_pr_base(project_id: str, base_sha: str, review_id: str) -> Path:
             f"The project may need to be re-indexed."
         )
 
+    # Get the GitHub URL from the local project clone so we can fetch directly
+    # from GitHub when the shallow clone doesn't have the base commit.
+    github_url_result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        cwd=project_dir, capture_output=True, text=True, timeout=10,
+    )
+    github_url = github_url_result.stdout.strip() if github_url_result.returncode == 0 else None
+
     # Use a lightweight worktree clone (fast, shares git objects)
     subprocess.run(
         ["git", "clone", "--shared", "--no-checkout", str(project_dir), str(workdir)],
         capture_output=True, text=True, timeout=120, check=True,
     )
 
-    # Fetch the PR base commit if we don't have it
-    subprocess.run(
-        ["git", "fetch", "--depth=1", "origin", base_sha],
-        cwd=workdir, capture_output=True, text=True, timeout=180,
-    )
-
-    # Check out the base commit
+    # Try fast path: base_sha already available in shared object store
     result = subprocess.run(
         ["git", "checkout", base_sha],
         cwd=workdir, capture_output=True, text=True, timeout=60,
     )
-    if result.returncode != 0:
-        # Fallback: try via the source clone
-        subprocess.run(
-            ["git", "fetch", "--depth=1", str(project_dir), base_sha],
-            cwd=workdir, capture_output=True, text=True, timeout=120,
-        )
-        subprocess.run(
-            ["git", "checkout", base_sha],
-            cwd=workdir, capture_output=True, text=True, timeout=60, check=True,
-        )
+    if result.returncode == 0:
+        return workdir
 
+    # base_sha not available locally (shallow clone with --depth 1 during indexing).
+    # Fetch the base branch directly from GitHub, then checkout the exact SHA.
+    if github_url:
+        # Prefer fetching by branch name — more reliable than bare SHA fetch
+        fetch_ref = base_ref if base_ref else base_sha
+        subprocess.run(
+            ["git", "fetch", "--depth=50", github_url, fetch_ref],
+            cwd=workdir, capture_output=True, text=True, timeout=300,
+        )
+        result = subprocess.run(
+            ["git", "checkout", base_sha],
+            cwd=workdir, capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode == 0:
+            return workdir
+
+        # If exact SHA still not found after branch fetch, try HEAD of that branch
+        # (close enough for review purposes when base is very recent)
+        fetch_head = subprocess.run(
+            ["git", "rev-parse", "FETCH_HEAD"],
+            cwd=workdir, capture_output=True, text=True, timeout=10,
+        )
+        if fetch_head.returncode == 0:
+            subprocess.run(
+                ["git", "checkout", fetch_head.stdout.strip()],
+                cwd=workdir, capture_output=True, text=True, timeout=60, check=True,
+            )
+            logger.warning(
+                "Could not checkout exact base SHA %s; using FETCH_HEAD instead. "
+                "Review diff context may be slightly off.",
+                base_sha[:7],
+            )
+            return workdir
+
+    # Last resort: fall back to local HEAD (project was indexed at HEAD)
+    subprocess.run(
+        ["git", "checkout", "HEAD"],
+        cwd=workdir, capture_output=True, text=True, timeout=60, check=True,
+    )
+    logger.warning(
+        "Could not checkout base SHA %s; falling back to HEAD of local clone. "
+        "Review diff context may be slightly off.",
+        base_sha[:7],
+    )
     return workdir
 
 
@@ -256,7 +302,7 @@ async def run_pr_review(
         await emit("status", {"message": f"Checking out base commit {pr.base.sha[:7]}..."})
         workdir = await loop.run_in_executor(
             None,
-            lambda: _checkout_pr_base(project.id, pr.base.sha, record.id),
+            lambda: _checkout_pr_base(project.id, pr.base.sha, record.id, base_ref=pr.base.ref),
         )
 
         # ----------------------------------------------------------------

@@ -10,6 +10,20 @@ interface ToolResultProps {
   render: ToolRender
 }
 
+function AutoOnboardCard({ project, message }: { project?: any; message: string }) {
+  return (
+    <div className="space-y-2">
+      {project && (
+        <ProjectCard project={project} indexing={true} />
+      )}
+      <div className="bg-blue-50 border border-blue-200 rounded-2xl px-4 py-3 flex items-start gap-2">
+        <span className="text-base">ℹ️</span>
+        <p className="text-sm text-blue-800">{message}</p>
+      </div>
+    </div>
+  )
+}
+
 function ErrorCard({ message, suggestion }: { message: string; suggestion?: string }) {
   return (
     <div className="bg-red-50 border border-red-200 rounded-2xl px-4 py-3">
@@ -67,6 +81,9 @@ export default function ToolResult({ summary, render }: ToolResultProps) {
           bugDescription={render.bug_description}
         />
       )
+      break
+    case 'auto_onboard':
+      body = <AutoOnboardCard project={render.project} message={render.message} />
       break
     case 'error':
       body = <ErrorCard message={render.message} suggestion={render.suggestion} />

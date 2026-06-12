@@ -280,15 +280,24 @@ async def tool_review_pr(pr_url: str, **kwargs) -> dict:
 
     project = await get_project_by_repo_name(repo_name)
     if not project:
+        # Auto-onboard the project so the user doesn't have to add it manually
+        add_result = await tool_add_project(repo_url=f"https://github.com/{repo_name}")
+        if add_result.get("render", {}).get("kind") == "error":
+            return add_result
         return {
             "summary": (
-                f"Project '{repo_name}' is not onboarded yet. "
-                f"Ask me to add it first: 'Add github.com/{repo_name}'"
+                f"Project '{repo_name}' wasn't indexed yet — started indexing it now. "
+                f"Indexing usually takes 1-5 minutes. "
+                f"Once status shows 'indexed', say 'review the PR again' and I'll run it."
             ),
             "render": {
-                "kind": "error",
-                "message": f"'{repo_name}' is not onboarded. Add the project first.",
-                "suggestion": f"Add github.com/{repo_name}",
+                "kind": "auto_onboard",
+                "project": add_result.get("render", {}).get("project"),
+                "pr_url": pr_url,
+                "message": (
+                    f"Indexing '{repo_name}' in the background. "
+                    f"Retry the review when indexing is complete."
+                ),
             },
         }
     if project.status != "indexed":
@@ -349,11 +358,18 @@ async def tool_fix_bug(repo_name: str, bug_description: str, user_login: str = "
     """Fix a bug without a PR — chat-driven fix."""
     project = await get_project_by_repo_name(repo_name)
     if not project:
+        add_result = await tool_add_project(repo_url=f"https://github.com/{repo_name}")
+        if add_result.get("render", {}).get("kind") == "error":
+            return add_result
         return {
-            "summary": f"Project '{repo_name}' is not onboarded.",
+            "summary": (
+                f"Project '{repo_name}' wasn't indexed yet — started indexing it now. "
+                f"Once indexing completes (1-5 min), say 'fix the bug again' and I'll run it."
+            ),
             "render": {
-                "kind": "error",
-                "message": f"'{repo_name}' is not onboarded. Add it first.",
+                "kind": "auto_onboard",
+                "project": add_result.get("render", {}).get("project"),
+                "message": f"Indexing '{repo_name}'. Retry fix_bug when status is 'indexed'.",
             },
         }
     if project.status != "indexed":
@@ -376,11 +392,18 @@ async def tool_refactor_code(
     """Refactor code in a project without a PR."""
     project = await get_project_by_repo_name(repo_name)
     if not project:
+        add_result = await tool_add_project(repo_url=f"https://github.com/{repo_name}")
+        if add_result.get("render", {}).get("kind") == "error":
+            return add_result
         return {
-            "summary": f"Project '{repo_name}' is not onboarded.",
+            "summary": (
+                f"Project '{repo_name}' wasn't indexed yet — started indexing it now. "
+                f"Once indexing completes (1-5 min), say 'refactor again' and I'll run it."
+            ),
             "render": {
-                "kind": "error",
-                "message": f"'{repo_name}' is not onboarded. Add it first.",
+                "kind": "auto_onboard",
+                "project": add_result.get("render", {}).get("project"),
+                "message": f"Indexing '{repo_name}'. Retry refactor when status is 'indexed'.",
             },
         }
     if project.status != "indexed":
