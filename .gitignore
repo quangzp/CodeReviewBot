@@ -26,8 +26,8 @@ frontend/dist/
 dist/
 build/
 
-# Docs / planning files (slide decks, progress notes, architecture overviews)
-docs/
+# Progress notes and personal planning files (not for version control)
+docs/claude-progress.md
 
 # SWE-bench prediction outputs (all variants)
 test_predictions*.jsonl
