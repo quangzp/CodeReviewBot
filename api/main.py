@@ -126,9 +126,12 @@ async def health():
     Returns 200 if everything is reachable, 503 with detail if not.
     """
     from src_bot.config.config import configs
-    status: dict = {"neo4j": "ok", "weaviate": "ok", "llm_provider": configs.LLM_PROVIDER}
+    status: dict = {
+        "neo4j": "ok",
+        "llm_provider": configs.LLM_PROVIDER,
+        "embedding": f"{configs.EMBEDDING_MODEL} ({'enabled' if configs.EMBEDDING_ENABLED else 'disabled'})",
+    }
 
-    # Check Neo4j
     try:
         from neo4j import GraphDatabase
         driver = GraphDatabase.driver(
@@ -139,15 +142,6 @@ async def health():
         driver.close()
     except Exception as e:
         status["neo4j"] = f"error: {e}"
-
-    # Check Weaviate (optional — skip if not configured)
-    try:
-        import httpx
-        r = httpx.get("http://localhost:8080/v1/.well-known/ready", timeout=2.0)
-        if r.status_code != 200:
-            status["weaviate"] = f"error: HTTP {r.status_code}"
-    except Exception as e:
-        status["weaviate"] = f"unreachable: {e}"
 
     failed = [k for k, v in status.items() if isinstance(v, str) and v.startswith("error")]
     if failed:

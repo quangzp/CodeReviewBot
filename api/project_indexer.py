@@ -203,14 +203,45 @@ async def index_project(
             record.node_count = 0
             record.edge_count = 0
 
-        record.progress_pct = 95
+        record.progress_pct = 90
 
         await emit("status",
                    message=f"Built graph: {record.node_count} nodes, {record.edge_count} edges from {record.file_count} files",
-                   progress=95,
+                   progress=90,
                    node_count=record.node_count,
                    edge_count=record.edge_count,
                    file_count=record.file_count)
+
+        # --------------------------------------------------------------
+        # Phase 4: Generate + store embeddings for vector search
+        # --------------------------------------------------------------
+        if configs.EMBEDDING_ENABLED:
+            await emit("status", message="Generating embeddings for vector search...", progress=92)
+
+            def _embed():
+                from neo4j import GraphDatabase as _GDB
+                from swebench.neo4j_ingest import store_embeddings
+                drv = _GDB.driver(
+                    configs.APP_NEO4J_URL,
+                    auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
+                )
+                try:
+                    with drv.session() as sess:
+                        return store_embeddings(sess, record.id, configs.EMBEDDING_MODEL)
+                finally:
+                    drv.close()
+
+            try:
+                embedded = await loop.run_in_executor(None, _embed)
+                await emit("status",
+                           message=f"Embeddings ready: {embedded} code nodes indexed for vector search",
+                           progress=95)
+            except Exception as emb_err:
+                await emit("status",
+                           message=f"Vector embeddings skipped (non-fatal): {emb_err}",
+                           progress=95)
+
+        record.progress_pct = 95
 
         # Write project summary for Planner context injection
         def _write_summary():

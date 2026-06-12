@@ -19,10 +19,7 @@ langchain-groq>=0.2.0
 # --- Graph database (Neo4j) ---
 neo4j>=5.0.0
 
-# --- Vector database (Weaviate) ---
-weaviate-client>=4.0.0
-
-# --- Embedding model ---
+# --- Embedding model (for Neo4j vector index) ---
 sentence-transformers>=2.2.0
 
 # --- GitHub API ---

@@ -1,56 +1,60 @@
 from __future__ import annotations
 
 """
-Two-phase bounded GraphRAG retriever.
+Two-phase bounded GraphRAG retriever — Neo4j only (no Weaviate).
 
-Phase 1 (Broad): Weaviate semantic + keyword hybrid search -> top-k seed nodes
-Phase 2 (Narrow): Neo4j graph traversal -> 2-3 hop expansion per seed
+Phase 1 (Broad): Neo4j hybrid search (BM25 + vector cosine via RRF) → top-k seed nodes
+Phase 2 (Narrow): Neo4j graph traversal → 2-3 hop expansion per seed
 
-This ensures O(k * hop_fanout) context size regardless of repo size.
-For a 10,000-file Django repo: 20 seeds * ~25 nodes/seed = ~500 nodes max.
+Context size is O(k * hop_fanout) regardless of repo size.
+For a 10,000-file repo: 20 seeds × ~25 nodes/seed = ~500 nodes max.
 """
 
-import weaviate
 from typing import List, Optional
+from neo4j import GraphDatabase
 from src_bot.neo4jdb.neo4j_service import Neo4jService
 from src_bot.config.config import configs
-from sentence_transformers import SentenceTransformer
+from swebench.neo4j_ingest import hybrid_search
 
 
 class CustomGraphRAGRetriever:
     def __init__(self):
         self.neo4j_service = Neo4jService()
-        self.model = SentenceTransformer(
-            "microsoft/codebert-base",
-            device="cpu",
+        self._driver = GraphDatabase.driver(
+            configs.APP_NEO4J_URL,
+            auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
         )
-        self.weaviate_client = weaviate.connect_to_local()
-        self.weaviate_collection = configs.WEAVIATE_COLLECTION_NAME
 
     def close(self):
-        """Close connections when done."""
         self.neo4j_service.db.driver.close()
-        self.weaviate_client.close()
+        self._driver.close()
 
-    def search(self, query_text: str, top_k: int = None) -> List[str]:
+    def search(self, query_text: str, top_k: int = None, project_id: str = "") -> List[str]:
         """
-        Two-phase hybrid search: Vector (Weaviate) -> Graph (Neo4j).
+        Two-phase hybrid search: Neo4j BM25+vector → graph expansion.
 
-        Phase 1: Weaviate finds top-k semantically similar code chunks.
-        Phase 2: For each seed, Neo4j expands local graph context (bounded).
+        Args:
+            query_text: natural-language or code query
+            top_k: number of seed nodes (default from config)
+            project_id: project_id to scope the search
 
         Returns list of formatted context strings for LLM consumption.
         """
         top_k = top_k or configs.RETRIEVER_TOP_K
         max_hops = configs.RETRIEVER_MAX_HOPS
 
-        # Phase 1: Semantic search in Weaviate (fast, bounded)
-        seed_nodes = self._weaviate_search(query_text, top_k=top_k)
+        with self._driver.session() as session:
+            seed_nodes = hybrid_search(
+                session,
+                query_text,
+                project_id,
+                top_k=top_k,
+                model_name=configs.EMBEDDING_MODEL,
+            )
 
         if not seed_nodes:
             return []
 
-        # Phase 2: Graph expansion from seed nodes (bounded per seed)
         final_context = []
         total_nodes = 0
 
@@ -58,23 +62,21 @@ class CustomGraphRAGRetriever:
             if total_nodes >= configs.RETRIEVER_MAX_CONTEXT_NODES:
                 break
 
-            ast_hash = item.get("ast_hash")
-            if not ast_hash:
+            node_id = item.get("node_id")
+            if not node_id:
                 continue
 
-            graph_data = self.neo4j_service.get_node_by_ast_hash(ast_hash)
+            graph_data = self.neo4j_service.get_node_by_ast_hash(node_id)
             if not graph_data:
                 continue
 
-            # Bounded traversal: max_hops per seed (default 3, not 7/20)
             related_nodes = self.neo4j_service.get_related_nodes(
                 [graph_data],
                 max_level=max_hops,
-                max_results=50,  # cap per seed
+                max_results=50,
             )
             relationship_data = self.neo4j_service.extract_relationships(related_nodes)
 
-            # Format the seed node info + relationships
             context_str = self._format_context(item, relationship_data)
             if context_str:
                 final_context.append(context_str)
@@ -82,38 +84,13 @@ class CustomGraphRAGRetriever:
 
         return final_context
 
-    def _weaviate_search(self, query_text: str, top_k: int) -> List[dict]:
-        """Phase 1: Weaviate hybrid search (vector + keyword)."""
-        query_embedding = self.model.encode(query_text, normalize_embeddings=True)
-        collection = self.weaviate_client.collections.use(self.weaviate_collection)
-        response = collection.query.hybrid(
-            query=query_text,
-            vector=query_embedding.tolist(),
-            alpha=0.5,
-            limit=top_k,
-            return_properties=["ast_hash", "name", "content", "file_path", "node_type"],
-        )
-
-        results = []
-        for obj in response.objects:
-            results.append({
-                "ast_hash": obj.properties.get("ast_hash"),
-                "name": obj.properties.get("name"),
-                "content": obj.properties.get("content"),
-                "file_path": obj.properties.get("file_path"),
-                "node_type": obj.properties.get("node_type"),
-            })
-        return results
-
     def _format_context(
         self, seed_node: dict, relationship_data: List[dict]
     ) -> Optional[str]:
-        """Format a seed node and its graph relationships for LLM context."""
         parts = []
 
-        # Seed node info
         name = seed_node.get("name", "unknown")
-        node_type = seed_node.get("node_type", "unknown")
+        node_type = seed_node.get("type", "unknown")
         file_path = seed_node.get("file_path", "unknown")
         content = seed_node.get("content", "")
 
@@ -122,7 +99,6 @@ class CustomGraphRAGRetriever:
         if content:
             parts.append(f"```\n{content}\n```")
 
-        # Graph relationships
         if relationship_data:
             parts.append("\nRelated code from knowledge graph:")
             for rel in relationship_data:

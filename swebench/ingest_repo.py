@@ -1,5 +1,5 @@
 """
-SWE-bench repo ingestion — one-time Neo4j + Weaviate population per repo.
+SWE-bench repo ingestion — one-time Neo4j population per repo.
 
 SWE-bench Lite tasks come from ~12 Python repos (django, scikit-learn, etc.).
 We ingest each repo once and cache the graph, then reuse it across all tasks
@@ -20,8 +20,6 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-
-from sentence_transformers import SentenceTransformer
 
 # Cache file to track which repos have been ingested
 CACHE_FILE = Path(__file__).parent / ".ingestion_cache.json"
@@ -93,8 +91,8 @@ def ingest_repo(
     # Step 2: Parse and import into Neo4j
     _ingest_to_neo4j(repo_path, py_files, project_id)
 
-    # Step 3: Generate embeddings and import into Weaviate
-    _ingest_to_weaviate(project_id)
+    # Step 3: Generate embeddings and store in Neo4j vector index
+    _store_embeddings(project_id)
 
     # Step 4: Update cache
     cache = _load_cache()
@@ -124,7 +122,7 @@ def _ingest_to_neo4j(repo_path: Path, py_files: list[Path], project_id: str):
     # Import files as nodes
     # NOTE: This is a simplified ingestion. For production, use tree-sitter
     # to parse AST and create MethodNode, ClassNode, EndpointNode, etc.
-    # Your existing ingest_weaviate.py handles the full AST parsing.
+    # Use swebench/neo4j_ingest.py for full AST parsing.
     import_count = 0
     with db.driver.session() as session:
         for py_file in py_files:
@@ -158,68 +156,24 @@ def _ingest_to_neo4j(repo_path: Path, py_files: list[Path], project_id: str):
     print(f"  Imported {import_count} nodes to Neo4j")
 
 
-def _ingest_to_weaviate(project_id: str):
-    """Query Neo4j nodes and generate embeddings for Weaviate."""
-    import weaviate
-    from weaviate.util import generate_uuid5
+def _store_embeddings(project_id: str):
+    """Generate embeddings for Neo4j CodeNodes and store them for vector search."""
     from src_bot.neo4jdb.neo4j_db import Neo4jDB
     from src_bot.config.config import configs
+    from swebench.neo4j_ingest import store_embeddings
 
-    print("  Generating embeddings and importing to Weaviate...")
-
+    print("  Generating embeddings and storing in Neo4j vector index...")
     db = Neo4jDB()
-    query = """
-    MATCH (n) WHERE n.project_id = $pid
-    RETURN n.ast_hash as id, labels(n)[0] as type,
-           n.name as name, n.content as content, n.file_path as source
-    """
-    with db.driver.session() as session:
-        result = session.run(query, {"pid": project_id})
-        chunks = [dict(record) for record in result]
-    db.close()
-
-    if not chunks:
-        print("  No nodes found in Neo4j to embed")
-        return
-
-    # Generate embeddings
-    model = SentenceTransformer("microsoft/codebert-base", device="cpu")
-    texts = [c.get("content", "") or "" for c in chunks]
-    embeddings = model.encode(
-        texts,
-        batch_size=64,
-        show_progress_bar=True,
-        normalize_embeddings=True,
-    )
-
-    # Import to Weaviate
-    client = weaviate.connect_to_local()
-    collection_name = configs.WEAVIATE_COLLECTION_NAME or "CodeBotCollection"
-    collection = client.collections.use(collection_name)
-
-    with collection.batch.fixed_size(batch_size=10) as batch:
-        for i, chunk in enumerate(chunks):
-            properties = {
-                "name": chunk.get("name", ""),
-                "content": chunk.get("content", ""),
-                "file_path": chunk.get("source", ""),
-                "node_type": chunk.get("type", ""),
-                "ast_hash": chunk.get("id", ""),
-            }
-            uuid = generate_uuid5(chunk["id"])
-            batch.add_object(
-                properties=properties,
-                uuid=uuid,
-                vector=embeddings[i].tolist(),
-            )
-
-    agg = collection.aggregate.over_all(total_count=True)
-    print(f"  Weaviate total documents: {agg.total_count}")
-    client.close()
+    try:
+        with db.driver.session() as session:
+            count = store_embeddings(session, project_id, configs.EMBEDDING_MODEL)
+        print(f"  Stored embeddings for {count} nodes")
+    finally:
+        db.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Ingest a repo into Neo4j + Weaviate")
+    parser = argparse.ArgumentParser(description="Ingest a repo into Neo4j (code graph + vector embeddings)")
     parser.add_argument("--repo-path", required=True, help="Path to cloned repo")
     parser.add_argument("--project-id", required=True, help="Unique project ID")
     parser.add_argument("--force", action="store_true", help="Re-ingest even if cached")

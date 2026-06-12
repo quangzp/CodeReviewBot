@@ -45,8 +45,10 @@ class Configs(BaseSettings):
     # GitHub
     GITHUB_TOKEN: str = os.getenv("GITHUB_TOKEN", "")
 
-    # Weaviate
-    WEAVIATE_COLLECTION_NAME: str = os.getenv("WEAVIATE_COLLECTION_NAME", "")
+    # Embedding model for vector search (sentence-transformers, stored in Neo4j)
+    EMBEDDING_ENABLED: bool = os.getenv("EMBEDDING_ENABLED", "true").lower() == "true"
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+    EMBEDDING_VECTOR_DIM: int = int(os.getenv("EMBEDDING_VECTOR_DIM", "384"))
 
     # LLM Configuration
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "groq")  # ollama | groq | openai | together | vllm
