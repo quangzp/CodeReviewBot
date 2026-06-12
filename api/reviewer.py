@@ -156,6 +156,144 @@ def _cleanup_workdir(review_id: str):
         shutil.rmtree(workdir, ignore_errors=True)
 
 
+def _synthesize_dependency_fix(
+    file_reviews: list,
+    workdir: Path,
+) -> "Optional[FileReviewResult]":
+    """
+    Detect 'No module named X' faults appearing across 2+ files and generate
+    a requirements.txt patch. The per-file harness cannot fix missing dependencies
+    by patching Python source files — this step handles that class of fault.
+    """
+    import difflib
+
+    _missing_pat = re.compile(
+        r"no module named ['\"]?([\w][\w\.\-]*)['\"]?", re.IGNORECASE
+    )
+
+    module_counts: dict = {}
+    for fr in file_reviews:
+        for m in _missing_pat.finditer(fr.phase2_fault or ""):
+            top = m.group(1).split(".")[0].lower()
+            module_counts[top] = module_counts.get(top, 0) + 1
+
+    if not module_counts:
+        return None
+
+    # Require 2+ files to agree on the same missing module (noise filter)
+    confirmed = {mod for mod, cnt in module_counts.items() if cnt >= 2}
+    if not confirmed:
+        return None
+
+    # Find requirements.txt (check common locations)
+    dep_candidates = [
+        "requirements.txt", "requirements-dev.txt",
+        "requirements/base.txt", "requirements/common.txt",
+    ]
+    dep_path = dep_filename = None
+    for df in dep_candidates:
+        c = workdir / df
+        if c.exists():
+            dep_path, dep_filename = c, df
+            break
+
+    if dep_path is None:
+        return None
+
+    original_content = dep_path.read_text(errors="ignore")
+
+    # Map common import names → PyPI install names
+    _PYPI: dict = {
+        "langgraph": "langgraph",
+        "langchain": "langchain",
+        "langchain_core": "langchain-core",
+        "langchain_groq": "langchain-groq",
+        "langchain_openai": "langchain-openai",
+        "langchain_ollama": "langchain-ollama",
+        "langchain_community": "langchain-community",
+        "sklearn": "scikit-learn",
+        "cv2": "opencv-python",
+        "PIL": "Pillow",
+        "bs4": "beautifulsoup4",
+        "yaml": "PyYAML",
+        "dotenv": "python-dotenv",
+        "jwt": "PyJWT",
+        "aiohttp": "aiohttp",
+        "httpx": "httpx",
+        "pydantic": "pydantic",
+        "fastapi": "fastapi",
+        "uvicorn": "uvicorn",
+        "sqlalchemy": "SQLAlchemy",
+        "openai": "openai",
+        "anthropic": "anthropic",
+        "neo4j": "neo4j",
+        "weaviate": "weaviate-client",
+    }
+
+    already = original_content.lower()
+    to_add = []
+    for mod in sorted(confirmed):
+        pkg = _PYPI.get(mod, mod.replace("_", "-"))
+        if pkg.lower() not in already and mod not in already:
+            to_add.append(pkg)
+
+    if not to_add:
+        return None
+
+    # Build new requirements.txt content
+    sep = "\n" if original_content.endswith("\n") else "\n\n"
+    new_content = (
+        original_content + sep
+        + "# Added by CodeReviewBot — missing dependencies detected\n"
+        + "\n".join(to_add) + "\n"
+    )
+
+    patch = "".join(difflib.unified_diff(
+        original_content.splitlines(keepends=True),
+        new_content.splitlines(keepends=True),
+        fromfile=f"a/{dep_filename}",
+        tofile=f"b/{dep_filename}",
+    ))
+    if not patch:
+        return None
+
+    # Verify the patch applies cleanly against the current workdir state
+    try:
+        r = subprocess.run(
+            ["git", "apply", "--check", "--whitespace=fix"],
+            input=patch, cwd=workdir, capture_output=True, text=True, timeout=10,
+        )
+        applies = r.returncode == 0
+    except Exception:
+        applies = False
+
+    fr = FileReviewResult(file_path=dep_filename)
+    fr.phase1_found = True
+    fr.phase2_fault = (
+        f"Missing dependencies: {', '.join(sorted(confirmed))}. "
+        f"Imported across {sum(module_counts[m] for m in confirmed)} file(s) "
+        f"but not listed in {dep_filename}."
+    )
+    fr.patch = patch
+    fr.applies_cleanly = applies
+    fr.eval_score = 5 if applies else 3
+    fr.eval_reason = (
+        f"Adds {', '.join(to_add)} to {dep_filename}." if applies
+        else "Dependency patch generated but git apply check failed."
+    )
+    fr.risk_level = "low"
+    fr.review_comments = [{
+        "severity": "bug",
+        "line": None,
+        "message": (
+            f"Package(s) {', '.join(to_add)} are imported by the code "
+            f"but missing from {dep_filename}. "
+            f"The project will fail at runtime when installed from this file."
+        ),
+    }]
+    return fr
+
+
 async def run_pr_review(
     record: ReviewRecord,
     event_queue: asyncio.Queue,
@@ -176,21 +314,17 @@ async def run_pr_review(
     workdir: Optional[Path] = None
     neo4j_driver = None
 
-    # Set Langfuse trace context so every get_llm() call inside this review
-    # attaches its LLM generations to the same trace.
-    try:
-        from src_bot.observability.langfuse_ctx import set_trace_context, clear_trace_context, LangfuseTraceContext
-        set_trace_context(LangfuseTraceContext(
-            trace_id=record.id,
-            session_id=record.project_id,
-            user_id=record.author_login,
-            tags=["pr_review"],
-            metadata={"pr_url": record.pr_url, "repo": record.repo_name},
-        ))
-        _langfuse_active = True
-    except Exception as e:
-        logger.debug("Langfuse trace setup skipped: %s", e)
-        _langfuse_active = False
+    # Open a Langfuse root span (= trace) for this review (v3 API).
+    # langfuse_trace() is a no-op when LANGFUSE_ENABLED=false.
+    from src_bot.observability.langfuse_ctx import langfuse_trace
+    _lf_trace = langfuse_trace(
+        trace_id=record.id,
+        session_id=record.project_id,
+        user_id=record.author_login or "unknown",
+        tags=["pr_review"],
+        metadata={"pr_url": record.pr_url, "repo": record.repo_name},
+    )
+    _lf_trace.__enter__()
 
     try:
         record.status = "running"
@@ -306,9 +440,14 @@ async def run_pr_review(
         )
 
         # ----------------------------------------------------------------
-        # 3. Set up LLM + Neo4j (reads only)
+        # 3. Set up LLMs + Neo4j (reads only)
         # ----------------------------------------------------------------
+        # llm       : phase1 file localization + memory extraction
+        # llm_reason: memory fact extraction (reason LLM — used after review)
+        # The harness (api/agent/harness.py) creates its own role-specific LLMs
+        # internally so per-file routing stays self-contained.
         llm = get_llm(role="generation", temperature=0)
+        llm_reason = get_llm(role="reason", temperature=0)  # memory extraction only
         neo4j_driver = GraphDatabase.driver(
             configs.APP_NEO4J_URL,
             auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
@@ -316,10 +455,9 @@ async def run_pr_review(
 
         # Import pipeline helpers (they only QUERY the graph, no ingestion)
         from run_swebench_v2 import (
-            phase1_localize_file, phase2_localize_fault, phase3_generate_patch,
-            _verify_patch_applies, _get_graph_context_for_file,
+            phase1_localize_file, _get_graph_context_for_file,
         )
-        from src_bot.reflexion.reflector import generate_reflection
+        from api.agent.harness import run_file_review
         from src_bot.memory.memory_neo4j import build_memory_context, record_review as graphiti_record_review
         from src_bot.memory.extractor import extract_facts_from_review
 
@@ -363,11 +501,21 @@ async def run_pr_review(
 
                 # Phase 1: confirm the file (PR tells us which file; we sanity-check)
                 await emit("phase", {"phase": 1, "file": file_path, "status": "running"})
-                with langfuse_span("phase1_file_localization", metadata={"file": file_path}):
-                    found_file = await loop.run_in_executor(
-                        None, phase1_localize_file,
-                        llm, issue_text, repo_name, workdir, session, project_id,
+                try:
+                    with langfuse_span("phase1_file_localization", metadata={"file": file_path}):
+                        found_file = await loop.run_in_executor(
+                            None, phase1_localize_file,
+                            llm, issue_text, repo_name, workdir, session, project_id,
+                        )
+                except Exception as _p1_err:
+                    # LLM auth failure (401) or connectivity error — fall back to
+                    # using the file path from GitHub directly.  Do NOT crash the
+                    # whole review; the harness will surface LLM errors per-file.
+                    logger.warning(
+                        "[phase1] LLM call failed for %s (%s) — using file path directly",
+                        file_path, _p1_err,
                     )
+                    found_file = file_path if (workdir / file_path).exists() else None
                 actual_file = file_path if (workdir / file_path).exists() else found_file
                 file_result.phase1_found = bool(actual_file)
                 await emit("phase", {
@@ -378,23 +526,7 @@ async def run_pr_review(
                     file_reviews.append(file_result)
                     continue
 
-                # Phase 2: fault localization (uses existing graph)
-                await emit("phase", {"phase": 2, "file": file_path, "status": "running"})
-                with langfuse_span("phase2_fault_localization", metadata={"file": actual_file}):
-                    fault_desc, file_content = await loop.run_in_executor(
-                        None, phase2_localize_fault,
-                        llm, issue_text, actual_file, workdir, session, project_id,
-                    )
-                file_result.phase2_fault = fault_desc[:200]
-                await emit("phase", {
-                    "phase": 2, "file": file_path,
-                    "fault": fault_desc[:100], "status": "done",
-                })
-                if not file_content:
-                    file_reviews.append(file_result)
-                    continue
-
-                # ── Harness: Risk Scoring (CHID) + Content Escalation + Context Budget ──
+                # ── Risk Scoring (CHID) + Security Escalation ────────────────
                 try:
                     from src_bot.risk.scorer import RiskScorer, RiskInput
                     from src_bot.risk.git_enrichment import compute_file_stats, is_new_contributor as _is_new_contributor
@@ -409,17 +541,9 @@ async def run_pr_review(
                         is_new_contributor=_is_new,
                     ))
                     file_result.risk_level = _risk_result.level
-                    logger.debug(
-                        "[risk] %s → %s (score=%.2f, bug_freq=%d, churn=%d, new=%s)",
-                        actual_file, _risk_result.level, _risk_result.score,
-                        _fgs.bug_frequency if _fgs else 0,
-                        _fgs.contributor_churn if _fgs else 0,
-                        _is_new,
-                    )
                 except Exception as e:
                     logger.warning("[risk] Risk scoring failed for %s: %s", actual_file, e)
 
-                # Content-based escalation: security-sensitive files → always high
                 _SECURITY_PATTERNS = {
                     "auth", "password", "token", "secret", "encrypt",
                     "permission", "role", "admin", "credential", "oauth",
@@ -428,156 +552,39 @@ async def run_pr_review(
                 if any(p in actual_file.lower() for p in _SECURITY_PATTERNS):
                     file_result.risk_level = "high"
 
-                # Map risk level → context depth + retry budget
                 _RISK_TOP_K = {"low": 10, "medium": 15, "high": 25}
-                _RISK_RETRIES = {"low": 2, "medium": 3, "high": 5}
                 _top_k = _RISK_TOP_K.get(file_result.risk_level, 15)
-                max_retries = _RISK_RETRIES.get(
-                    file_result.risk_level, configs.REFLEXION_MAX_RETRIES
-                )
-                # ── End Risk Scoring ─────────────────────────────────────────────
+                # ── End Risk Scoring ──────────────────────────────────────────
 
-                # Graph context for Reflexion (depth scales with risk)
+                # Graph context (depth scales with risk) — uses session
                 graph_context = _get_graph_context_for_file(
                     session, actual_file, project_id, top_k=_top_k
                 )
 
-                # ── Phase 2.5: Planner — generate structured contract ─────────
-                from api.agent.planner import generate_plan_sync
-                with langfuse_span("phase2_5_planner", metadata={"file": actual_file, "risk": file_result.risk_level}):
-                    _contract = await loop.run_in_executor(
-                        None,
-                        generate_plan_sync,
-                        fault_desc,
-                        issue_text,
-                        actual_file,
-                        graph_context,
-                        "bug_fix",
+                # ── LangGraph Harness: analyze_fault → plan → generate → verify
+                #    → reflect (retry) → orchestrate (dynamic routing by reason LLM) ──
+                with langfuse_span("harness_file_review", metadata={"file": actual_file, "risk": file_result.risk_level}):
+                    harness_result = await loop.run_in_executor(
+                        None, run_file_review,
+                        issue_text, actual_file, graph_context, workdir,
+                        project_id, file_result.risk_level, configs.REFLEXION_MAX_RETRIES,
                     )
-                _plan_context = _contract.to_prompt_section()
-                await emit("phase", {
-                    "phase": 2.5, "file": file_path, "status": "planned",
-                    "root_cause": _contract.root_cause[:120],
-                })
-                # ── End Planner ───────────────────────────────────────────────
 
-                # Phase 3: patch generation + Reflexion loop
-                reflections: list[str] = []
-                last_patch = ""
-                last_error = ""
+                # Replay SSE events collected inside the harness
+                for ev_type, ev_data in harness_result.events:
+                    await emit(ev_type, ev_data)
 
-                for attempt in range(1, max_retries + 1):
-                    await emit("phase", {
-                        "phase": 3, "file": file_path,
-                        "attempt": attempt, "max_attempts": max_retries,
-                        "status": "running",
-                    })
-
-                    if attempt == 1:
-                        with langfuse_span("phase3_patch_generation", metadata={"file": actual_file, "attempt": attempt}):
-                            patch = await loop.run_in_executor(
-                                None, phase3_generate_patch,
-                                llm, issue_text, actual_file, fault_desc, file_content,
-                                "", "", _plan_context,
-                            )
-                    else:
-                        try:
-                            reflection = await loop.run_in_executor(
-                                None, generate_reflection,
-                                llm,
-                                f"{issue_text[:500]}\n\nFault: {fault_desc}",
-                                last_patch, last_error, graph_context, reflections,
-                            )
-                            reflections.append(reflection)
-                        except Exception as _ref_err:
-                            logger.warning("[reflexion] Reflection generation failed (attempt %d): %s", attempt, _ref_err)
-                            reflection = f"Previous patch failed: {last_error}"
-                            reflections.append(reflection)
-
-                        with langfuse_span("phase3_patch_generation", metadata={"file": actual_file, "attempt": attempt}):
-                            patch = await loop.run_in_executor(
-                                None, phase3_generate_patch,
-                                llm, issue_text, actual_file, fault_desc, file_content,
-                                reflection, last_patch, _plan_context,
-                            )
-
-                    if not patch:
-                        last_error = "Empty patch generated"
-                        await emit("phase", {
-                            "phase": 3, "file": file_path,
-                            "attempt": attempt, "status": "empty",
-                        })
-                        continue
-
-                    applies_ok, apply_error = _verify_patch_applies(patch, workdir)
-                    if applies_ok:
-                        # ── Harness: Multi-gate Verification ─────────────────
-                        from src_bot.verification.pipeline import verify_patch
-                        verification = await loop.run_in_executor(
-                            None,
-                            verify_patch,
-                            patch,
-                            workdir,
-                            issue_text,
-                            fault_desc,
-                            _contract,
-                            "bug_fix",
-                            configs.EXECUTION_GATE_ENABLED,
-                            configs.EXECUTION_GATE_TEST_CMD,
-                            configs.EXECUTION_GATE_TIMEOUT,
-                        )
-                        eval_score = verification.llm_score
-                        eval_reason = verification.llm_reason
-                        await emit("phase", {
-                            "phase": 3, "file": file_path,
-                            "attempt": attempt, "status": "evaluated",
-                            "eval_score": eval_score, "eval_reason": eval_reason,
-                            "ast_passed": verification.ast_result.passed,
-                            "tests_skipped": (
-                                verification.test_result.skipped
-                                if verification.test_result else True
-                            ),
-                        })
-
-                        if not verification.passed and attempt < max_retries:
-                            last_patch = patch
-                            last_error = verification.rejection_reason
-                            await emit("phase", {
-                                "phase": 3, "file": file_path,
-                                "attempt": attempt, "status": "verification_rejected",
-                            })
-                            continue
-                        # ── End Verification ──────────────────────────────────
-
-                        file_result.patch = patch
-                        file_result.applies_cleanly = True
-                        file_result.reflexion_attempts = attempt
-                        file_result.eval_score = eval_score
-                        file_result.eval_reason = eval_reason
-                        patches_generated += 1
-                        await emit("phase", {
-                            "phase": 3, "file": file_path,
-                            "attempt": attempt, "status": "success",
-                            "patch_size": len(patch),
-                            "eval_score": eval_score,
-                        })
-                        break
-                    else:
-                        # ── Harness: Frustration detection ───────────────────
-                        if last_patch and len(patch) < len(last_patch) * 0.6:
-                            await emit("phase", {
-                                "phase": 3, "file": file_path,
-                                "attempt": attempt, "status": "frustration_detected",
-                                "message": "Patch shrinking — agent confused, widening context",
-                            })
-                        # ── End Frustration detection ─────────────────────────
-                        last_patch = patch
-                        last_error = f"git apply failed: {apply_error}"
-                        await emit("phase", {
-                            "phase": 3, "file": file_path,
-                            "attempt": attempt, "status": "apply_failed",
-                            "error": apply_error[:100],
-                        })
+                # Map harness result → FileReviewResult
+                file_result.phase2_fault = harness_result.fault_desc[:200]
+                file_result.patch = harness_result.patch
+                file_result.applies_cleanly = harness_result.applies_cleanly
+                file_result.eval_score = harness_result.eval_score
+                file_result.eval_reason = harness_result.eval_reason
+                file_result.reflexion_attempts = harness_result.reflexion_attempts
+                file_result.review_comments = harness_result.review_comments
+                if harness_result.patch:
+                    patches_generated += 1
+                # ── End Harness ────────────────────────────────────────────────
 
                 file_reviews.append(file_result)
 
@@ -605,7 +612,65 @@ async def run_pr_review(
         # ── End Friction Summary ────────────────────────────────────────────
 
         # ----------------------------------------------------------------
-        # 6. MEMORY WRITE — learn from this review
+        # 6a. META-REVIEW — overall PR assessment (configurable LLM)
+        # ----------------------------------------------------------------
+        if configs.META_REVIEW_ENABLED:
+            try:
+                import json, re as _re
+                from langchain_core.messages import HumanMessage as _HM
+
+                # Determine meta-review LLM (OpenAI GPT-4 if configured, else reason LLM)
+                _meta_provider = configs.META_REVIEW_LLM_PROVIDER or None
+                _meta_model = configs.META_REVIEW_LLM_MODEL or None
+                if _meta_provider:
+                    _meta_llm = get_llm(provider=_meta_provider, model=_meta_model, temperature=0)
+                else:
+                    _meta_llm = get_llm(role="reason", temperature=0)
+
+                # Build concise summary of all file reviews for the meta-review prompt
+                _review_blocks = []
+                for _fr in file_reviews[:8]:  # cap at 8 files to stay within token budget
+                    if not _fr.phase2_fault and not _fr.review_comments:
+                        continue
+                    _comments = "\n".join(
+                        f"  [{c.get('severity','?')}] L{c.get('line','?')}: {c.get('message','')}"
+                        for c in (_fr.review_comments or [])[:4]
+                    )
+                    _review_blocks.append(
+                        f"### {_fr.file_path} (risk={_fr.risk_level}, score={_fr.eval_score}/5)\n"
+                        f"Fault: {_fr.phase2_fault[:120]}\n"
+                        f"Patch: {'✓ applies' if _fr.applies_cleanly else '✗ did not apply'}\n"
+                        + (_comments if _comments else "  (no extra comments)")
+                    )
+
+                _meta_prompt = (
+                    f"You are a senior software architect. Review this automated PR analysis and provide an overall assessment.\n\n"
+                    f"PR: {issue_text[:400]}\n\n"
+                    f"FILE ANALYSIS RESULTS:\n{'---'.join(_review_blocks)}\n\n"
+                    f"Respond with ONLY this JSON (no explanation):\n"
+                    f'{{"summary":"overall PR quality in 2-3 sentences",'
+                    f'"priority_issues":["top issue 1","top issue 2","top issue 3"],'
+                    f'"refactoring_opportunities":["suggestion 1","suggestion 2"],'
+                    f'"overall_score":<1-5>}}'
+                )
+
+                with langfuse_span("meta_review", metadata={"files": len(file_reviews)}):
+                    _meta_raw = await loop.run_in_executor(
+                        None, lambda: _meta_llm.invoke([_HM(content=_meta_prompt)])
+                    )
+                _meta_text = (_meta_raw.content or "").strip()
+                # Strip DeepSeek thinking block if present
+                _meta_text = _re.sub(r'<think>.*?</think>', '', _meta_text, flags=_re.DOTALL).strip()
+                _meta_match = _re.search(r'\{.*\}', _meta_text, _re.DOTALL)
+                if _meta_match:
+                    meta_review = json.loads(_meta_match.group())
+                    record.meta_review = meta_review
+                    await emit("meta_review", meta_review)
+            except Exception as _mr_err:
+                logger.warning("[meta_review] Failed (non-fatal): %s", _mr_err)
+
+        # ----------------------------------------------------------------
+        # 6b. MEMORY WRITE — learn from this review
         # ----------------------------------------------------------------
         await emit("status", {"message": "Learning from this review..."})
 
@@ -619,7 +684,7 @@ async def run_pr_review(
             fact = await loop.run_in_executor(
                 None,
                 lambda: extract_facts_from_review(
-                    llm,
+                    llm_reason,
                     repo_name=repo_name,
                     pr_number=pr_number,
                     pr_url=record.pr_url,
@@ -644,9 +709,52 @@ async def run_pr_review(
             })
         except Exception as e:
             logger.warning("[memory] Failed to write memory: %s", e)
+            await emit("memory", {
+                "message": f"Memory write failed (non-fatal): {str(e)[:120]}",
+            })
 
         # ----------------------------------------------------------------
-        # 7. Save & finalize
+        # 7. GitHub integration — post comment + create fix branch (opt-in)
+        # ----------------------------------------------------------------
+        if configs.GITHUB_POST_REVIEW_COMMENTS or configs.GITHUB_AUTO_FIX_PR:
+            from api.github_app import (
+                format_pr_review_comment, post_pr_review_comment,
+                create_fix_branch_pr,
+            )
+
+        if configs.GITHUB_POST_REVIEW_COMMENTS and github_token:
+            await emit("status", {"message": "Posting review comment to GitHub PR..."})
+            comment_body = format_pr_review_comment(
+                file_reviews, pr_number, repo_name, patches_generated,
+            )
+            ok = await loop.run_in_executor(
+                None, post_pr_review_comment, repo, pr, comment_body,
+            )
+            await emit("github_comment", {
+                "posted": ok,
+                "message": "Review comment posted to GitHub PR" if ok
+                           else "Could not post review comment (check token permissions)",
+            })
+
+        if configs.GITHUB_AUTO_FIX_PR and github_token and workdir:
+            await emit("status", {"message": "Creating fix branch on GitHub..."})
+            fix_pr_url = await loop.run_in_executor(
+                None, create_fix_branch_pr,
+                repo, pr, file_reviews, workdir, github_token,
+            )
+            if fix_pr_url:
+                await emit("github_fix_pr", {
+                    "url": fix_pr_url,
+                    "message": f"Fix branch PR created: {fix_pr_url}",
+                })
+            else:
+                await emit("github_fix_pr", {
+                    "url": None,
+                    "message": "Could not create fix branch (no clean patches or token lacks push access)",
+                })
+
+        # ----------------------------------------------------------------
+        # 8. Save & finalize
         # ----------------------------------------------------------------
         record.file_reviews = file_reviews
         record.total_patches = patches_generated
@@ -673,9 +781,8 @@ async def run_pr_review(
             _cleanup_workdir(record.id)
         except Exception:
             pass
-        if _langfuse_active:
-            try:
-                clear_trace_context()
-            except Exception:
-                pass
+        try:
+            _lf_trace.__exit__(None, None, None)
+        except Exception:
+            pass
         await event_queue.put(None)  # close SSE

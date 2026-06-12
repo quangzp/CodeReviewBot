@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -19,8 +20,18 @@ _current_trace: ContextVar[Optional[LangfuseTraceContext]] = ContextVar(
     "langfuse_trace", default=None
 )
 
-# Module-level singleton — avoids opening a new HTTP connection pool per phase call.
+# Module-level singleton — one HTTP connection pool for the process lifetime
 _langfuse_client: Optional[Any] = None
+
+
+def _ensure_env(configs) -> None:
+    """Set Langfuse env vars from config so v3 SDK can read them."""
+    if configs.LANGFUSE_PUBLIC_KEY:
+        os.environ.setdefault("LANGFUSE_PUBLIC_KEY", configs.LANGFUSE_PUBLIC_KEY)
+    if configs.LANGFUSE_SECRET_KEY:
+        os.environ.setdefault("LANGFUSE_SECRET_KEY", configs.LANGFUSE_SECRET_KEY)
+    if configs.LANGFUSE_HOST:
+        os.environ.setdefault("LANGFUSE_HOST", configs.LANGFUSE_HOST)
 
 
 def _get_langfuse_client() -> Optional[Any]:
@@ -29,12 +40,11 @@ def _get_langfuse_client() -> Optional[Any]:
         return _langfuse_client
     try:
         from src_bot.config.config import configs
+        if not configs.LANGFUSE_ENABLED:
+            return None
+        _ensure_env(configs)
         from langfuse import Langfuse
-        _langfuse_client = Langfuse(
-            public_key=configs.LANGFUSE_PUBLIC_KEY,
-            secret_key=configs.LANGFUSE_SECRET_KEY,
-            host=configs.LANGFUSE_HOST,
-        )
+        _langfuse_client = Langfuse()
         return _langfuse_client
     except Exception:
         return None
@@ -53,39 +63,6 @@ def clear_trace_context() -> None:
 
 
 @contextmanager
-def langfuse_span(name: str, *, metadata: Optional[dict] = None):
-    """Create a Langfuse span around a pipeline phase.
-
-    No-op when LANGFUSE_ENABLED=false or langfuse is not installed.
-    Use inside an active langfuse_trace() context.
-
-    Exactly ONE yield — exceptions from setup are swallowed (observability
-    must never break the pipeline), exceptions from the body propagate normally.
-    """
-    span = None
-    try:
-        from src_bot.config.config import configs
-        if configs.LANGFUSE_ENABLED:
-            ctx = get_trace_context()
-            if ctx:
-                client = _get_langfuse_client()
-                if client:
-                    trace = client.trace(id=ctx.trace_id)
-                    span = trace.span(name=name, metadata=metadata or {})
-    except Exception:
-        pass  # setup failure → no-op span, pipeline continues unaffected
-
-    try:
-        yield span
-    finally:
-        if span is not None:
-            try:
-                span.end()
-            except Exception:
-                pass
-
-
-@contextmanager
 def langfuse_trace(
     trace_id: str,
     *,
@@ -94,12 +71,15 @@ def langfuse_trace(
     tags: Optional[list[str]] = None,
     metadata: Optional[dict] = None,
 ):
-    """Set Langfuse trace context for the duration of a pipeline run.
+    """Open a root Langfuse span (= trace) for the duration of a pipeline run.
+
+    Langfuse v3 creates a trace automatically when the first span is started.
+    update_current_trace() sets user/session/tag metadata on that trace.
 
     Usage:
-        with langfuse_trace(trace_id=review.id, tags=["pr_review"]):
-            # all get_llm() calls inside here attach to this trace
-            ...
+        with langfuse_trace(trace_id=review.id, user_id=author, tags=["pr_review"]):
+            with langfuse_span("phase1"):
+                ...
     """
     ctx = LangfuseTraceContext(
         trace_id=trace_id,
@@ -109,7 +89,74 @@ def langfuse_trace(
         metadata=metadata or {},
     )
     token = _current_trace.set(ctx)
+
+    # Try to open a Langfuse root span; fall back to no-op if unavailable
+    span_cm = None
+    entered = False
+    try:
+        from src_bot.config.config import configs
+        if configs.LANGFUSE_ENABLED:
+            client = _get_langfuse_client()
+            if client:
+                span_cm = client.start_as_current_span(
+                    name=f"pipeline:{trace_id[:8]}", as_type="span"
+                )
+                span_cm.__enter__()
+                entered = True
+                try:
+                    client.update_current_trace(
+                        user_id=user_id,
+                        session_id=session_id,
+                        tags=tags,
+                        metadata=metadata,
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     try:
         yield ctx
     finally:
+        if entered and span_cm is not None:
+            try:
+                span_cm.__exit__(None, None, None)
+            except Exception:
+                pass
         _current_trace.reset(token)
+
+
+@contextmanager
+def langfuse_span(name: str, *, metadata: Optional[dict] = None):
+    """Create a child Langfuse span around a pipeline phase (v3 API).
+
+    No-op when LANGFUSE_ENABLED=false or langfuse is not installed.
+    Must be called inside an active langfuse_trace() context.
+    Exceptions from the body propagate normally; setup failures are swallowed.
+    """
+    span_cm = None
+    entered = False
+    try:
+        from src_bot.config.config import configs
+        if configs.LANGFUSE_ENABLED:
+            client = _get_langfuse_client()
+            if client:
+                span_cm = client.start_as_current_span(name=name, as_type="span")
+                span_cm.__enter__()
+                entered = True
+                if metadata:
+                    try:
+                        client.update_current_span(metadata=metadata)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    try:
+        yield span_cm
+    finally:
+        if entered and span_cm is not None:
+            try:
+                span_cm.__exit__(None, None, None)
+            except Exception:
+                pass

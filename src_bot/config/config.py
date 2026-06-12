@@ -65,13 +65,18 @@ class Configs(BaseSettings):
     # chat: agent loop + tool routing (needs strong reasoning; defaults to fast_gate config)
     CHAT_LLM_PROVIDER: str = os.getenv("CHAT_LLM_PROVIDER", "")  # empty = use FAST_LLM_PROVIDER
     CHAT_LLM_MODEL: str = os.getenv("CHAT_LLM_MODEL", "")         # empty = use FAST_LLM_MODEL
-    # generation: fix_bug / refactor / planner / reviewer (large coding model)
+    # generation: Phase 3 patch writing (code-specialized model)
     GEN_LLM_PROVIDER: str = os.getenv("GEN_LLM_PROVIDER", "")   # empty = use LLM_PROVIDER
     GEN_LLM_MODEL: str = os.getenv("GEN_LLM_MODEL", "")          # empty = use LLM_MODEL
+    # reason: Phase 2 fault analysis + Planner + Reflexion (reasoning-specialized model)
+    # Recommended: deepseek-r1-distill-llama-70b on Groq (free, chain-of-thought trained)
+    REASON_LLM_PROVIDER: str = os.getenv("REASON_LLM_PROVIDER", "")  # empty = fallback to GEN
+    REASON_LLM_MODEL: str = os.getenv("REASON_LLM_MODEL", "")         # empty = fallback to GEN
     # vLLM endpoint config
     VLLM_FAST_BASE: str = os.getenv("VLLM_FAST_BASE", "")
     VLLM_CHAT_BASE: str = os.getenv("VLLM_CHAT_BASE", "")
     VLLM_GEN_BASE: str = os.getenv("VLLM_GEN_BASE", "")
+    VLLM_REASON_BASE: str = os.getenv("VLLM_REASON_BASE", "")  # empty = shares VLLM_GEN_BASE
 
     # Langfuse observability (opt-in — disabled by default)
     LANGFUSE_ENABLED: bool = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"
@@ -83,6 +88,17 @@ class Configs(BaseSettings):
     EXECUTION_GATE_ENABLED: bool = os.getenv("EXECUTION_GATE_ENABLED", "true").lower() == "true"
     EXECUTION_GATE_TIMEOUT: int = int(os.getenv("EXECUTION_GATE_TIMEOUT", "300"))
     EXECUTION_GATE_TEST_CMD: str = os.getenv("EXECUTION_GATE_TEST_CMD", "python -m pytest --tb=short -q")
+
+    # GitHub integration — post review results back to the PR
+    GITHUB_POST_REVIEW_COMMENTS: bool = os.getenv("GITHUB_POST_REVIEW_COMMENTS", "false").lower() == "true"
+    GITHUB_AUTO_FIX_PR: bool = os.getenv("GITHUB_AUTO_FIX_PR", "false").lower() == "true"
+
+    # Meta-review: overall PR assessment after all files are reviewed
+    # Uses META_REVIEW_LLM_PROVIDER/MODEL if set; falls back to reason LLM (free, Groq)
+    # Set META_REVIEW_LLM_PROVIDER=openai + META_REVIEW_LLM_MODEL=gpt-4o to use GPT-4
+    META_REVIEW_ENABLED: bool = os.getenv("META_REVIEW_ENABLED", "true").lower() == "true"
+    META_REVIEW_LLM_PROVIDER: str = os.getenv("META_REVIEW_LLM_PROVIDER", "")
+    META_REVIEW_LLM_MODEL: str = os.getenv("META_REVIEW_LLM_MODEL", "")
 
     # Reflexion settings
     REFLEXION_MAX_RETRIES: int = int(os.getenv("REFLEXION_MAX_RETRIES", "3"))

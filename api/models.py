@@ -61,6 +61,8 @@ class FileReviewResult(BaseModel):
     eval_score: Optional[int] = None   # LLM quality score 1-5 (api/agent/evaluator.py)
     eval_reason: str = ""              # Evaluator feedback text
     risk_level: str = "unknown"        # low | medium | high | unknown
+    # Structured code review comments from code_review_node (fast_gate LLM)
+    review_comments: List[dict] = Field(default_factory=list)
     # Planner contract (Phase B)
     plan_contract: Optional[dict] = None
     # Verification gate results (Phase C)
@@ -82,6 +84,7 @@ class ReviewRecord(BaseModel):
     total_patches: int = 0
     error: Optional[str] = None
     author_login: Optional[str] = None    # captured for memory layer
+    meta_review: Optional[dict] = None   # overall PR assessment by meta-review LLM
 
 
 class ReviewSummary(BaseModel):

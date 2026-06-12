@@ -52,6 +52,15 @@ class _RateLimitedLLM:
         # Forward everything we don't override
         return getattr(self._llm, name)
 
+    @staticmethod
+    def _is_permanent_error(err_lower: str) -> bool:
+        return any(k in err_lower for k in (
+            "401", "403", "invalid api key", "invalid_api_key",
+            "authentication", "permission denied",
+            "model_decommissioned", "model decommissioned",
+            "is no longer supported", "has been decommissioned",
+        ))
+
     def invoke(self, input, *args, **kwargs):
         delay = 5
         for attempt in range(1, self._max_retries + 1):
@@ -59,6 +68,8 @@ class _RateLimitedLLM:
                 return self._llm.invoke(input, *args, **kwargs)
             except Exception as e:
                 err = str(e).lower()
+                if self._is_permanent_error(err):
+                    raise  # fail fast — retrying will not help
                 is_rate_limit = (
                     "429" in err
                     or "rate_limit" in err
@@ -77,7 +88,6 @@ class _RateLimitedLLM:
         raise RuntimeError("Max retries exceeded")
 
     async def ainvoke(self, input, *args, **kwargs):
-        # Async variant — same backoff loop using asyncio.sleep
         import asyncio
         delay = 5
         for attempt in range(1, self._max_retries + 1):
@@ -85,6 +95,8 @@ class _RateLimitedLLM:
                 return await self._llm.ainvoke(input, *args, **kwargs)
             except Exception as e:
                 err = str(e).lower()
+                if self._is_permanent_error(err):
+                    raise  # fail fast — retrying will not help
                 is_rate_limit = (
                     "429" in err
                     or "rate_limit" in err
@@ -177,11 +189,13 @@ def get_llm(
         provider: Override the provider (LLM_PROVIDER env var).
         model: Override the model (LLM_MODEL env var).
         temperature: Sampling temperature (0 = deterministic).
-        role: Optional routing hint — "fast_gate" | "generation" | "chat".
+        role: Optional routing hint — "fast_gate" | "reason" | "generation" | "chat".
               When set, uses role-specific env vars before falling back to defaults.
-              - fast_gate: classifier + evaluator (FAST_LLM_PROVIDER / FAST_LLM_MODEL)
-              - generation: Phase 1-2-3, reflexion (GEN_LLM_PROVIDER / GEN_LLM_MODEL)
-              - chat: agent loop (same as fast_gate — low latency preferred)
+              - fast_gate:  classifier + binary decisions  (FAST_LLM_PROVIDER / FAST_LLM_MODEL)
+              - reason:     Phase 2 fault analysis, Planner, Reflexion (REASON_LLM_*)
+                            falls back to GEN_LLM_* when REASON_LLM_* not set
+              - generation: Phase 3 patch writing only    (GEN_LLM_PROVIDER / GEN_LLM_MODEL)
+              - chat:       agent loop + tool routing      (CHAT_LLM_* → FAST_LLM_* fallback)
 
     Returns:
         A LangChain-compatible chat model.
@@ -197,6 +211,11 @@ def get_llm(
             # chat prefers CHAT_LLM_* but falls back to FAST_LLM_* for backward compat
             provider = configs.CHAT_LLM_PROVIDER or configs.FAST_LLM_PROVIDER or None
             model = configs.CHAT_LLM_MODEL or configs.FAST_LLM_MODEL or None
+        elif role == "reason":
+            # Phase 2 fault analysis, Planner contracts, Reflexion — reasoning-specialized
+            # Falls back to generation config when REASON_LLM_* not set
+            provider = configs.REASON_LLM_PROVIDER or configs.GEN_LLM_PROVIDER or None
+            model = configs.REASON_LLM_MODEL or configs.GEN_LLM_MODEL or None
         elif role == "generation":
             provider = configs.GEN_LLM_PROVIDER or None
             model = configs.GEN_LLM_MODEL or None
@@ -211,6 +230,9 @@ def get_llm(
     elif role == "chat" and (configs.VLLM_CHAT_BASE or configs.VLLM_GEN_BASE):
         # chat shares the gen endpoint when no dedicated VLLM_CHAT_BASE is set
         vllm_base = configs.VLLM_CHAT_BASE or configs.VLLM_GEN_BASE
+    elif role == "reason" and (configs.VLLM_REASON_BASE or configs.VLLM_GEN_BASE):
+        # reason shares gen endpoint unless a dedicated VLLM_REASON_BASE is set
+        vllm_base = configs.VLLM_REASON_BASE or configs.VLLM_GEN_BASE
     elif role == "generation" and configs.VLLM_GEN_BASE:
         vllm_base = configs.VLLM_GEN_BASE
 

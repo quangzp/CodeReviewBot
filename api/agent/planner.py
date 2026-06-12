@@ -159,7 +159,7 @@ def generate_plan(
             graph_context=graph_context[:600],
         )
 
-        llm = get_llm(role="generation", temperature=0)
+        llm = get_llm(role="reason", temperature=0)
         response = llm.invoke([HumanMessage(content=prompt)])
         raw = response.content.strip()
 

@@ -173,6 +173,26 @@ TOOL_DESCRIPTIONS = [
             },
         },
     },
+    {
+        "name": "apply_review_fixes",
+        "description": (
+            "Apply the patches from a completed PR review as a new fix-branch pull request on GitHub. "
+            "Only patches that were verified to apply cleanly are used. Creates a 'bot/fix-prN' branch, "
+            "commits the patches, and opens a PR. Requires GITHUB_TOKEN with repo write access. "
+            "Use when the user wants to actually push the bot's suggested fixes to GitHub — "
+            "ALWAYS ask for confirmation before calling this tool (it writes to the user's repo)."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pr_url": {
+                    "type": "string",
+                    "description": "Full GitHub PR URL of the review whose patches to apply, e.g. https://github.com/owner/repo/pull/123",
+                },
+            },
+            "required": ["pr_url"],
+        },
+    },
 ]
 
 
@@ -342,7 +362,8 @@ async def tool_review_pr(pr_url: str, **kwargs) -> dict:
         "summary": (
             f"Started reviewing {repo_name}#{pr_number}. "
             f"The pipeline (file localization → fault localization → patch generation + reflexion) "
-            f"is running in the background. Open the review for live progress."
+            f"is running in the background. Open the review for live progress. "
+            f"Once complete, I can push the verified patches as a fix-branch PR — just say 'apply the fixes'."
         ),
         "render": {
             "kind": "review",
@@ -448,6 +469,115 @@ async def tool_recent_reviews(repo_name: str = "", limit: int = 10, **kwargs) ->
     }
 
 
+async def tool_apply_review_fixes(pr_url: str, **kwargs) -> dict:
+    """Apply patches from the latest completed review of a PR as a fix-branch PR on GitHub."""
+    import os
+    from api.reviewer import parse_pr_url, _checkout_pr_base, _cleanup_workdir
+
+    try:
+        repo_name, pr_number = parse_pr_url(pr_url)
+    except ValueError as e:
+        return {"summary": f"Invalid PR URL: {e}", "render": {"kind": "error", "message": str(e)}}
+
+    # Find the most recent completed review for this PR
+    reviews = await list_reviews()
+    completed = [r for r in reviews if r.pr_url == pr_url and r.status == "completed"]
+    if not completed:
+        return {
+            "summary": (
+                f"No completed review found for PR #{pr_number}. "
+                f"Run `review_pr` first, then call this when the review finishes."
+            ),
+            "render": {"kind": "error", "message": "No completed review found for this PR."},
+        }
+
+    record = completed[0]  # list_reviews returns newest first
+
+    clean_patches = [fr for fr in record.file_reviews if fr.applies_cleanly and fr.patch]
+    if not clean_patches:
+        return {
+            "summary": (
+                f"Review #{pr_number} has no patches that apply cleanly. "
+                f"The harness may need another attempt, or the bugs require manual fixes."
+            ),
+            "render": {
+                "kind": "error",
+                "message": f"No applicable patches in review {record.id[:8]}.",
+            },
+        }
+
+    github_token = os.getenv("GITHUB_TOKEN", "")
+    if not github_token:
+        return {
+            "summary": (
+                "GITHUB_TOKEN is not set — I can't push to GitHub. "
+                "Add a token with 'repo' scope to .env and restart the server."
+            ),
+            "render": {"kind": "error", "message": "GITHUB_TOKEN not set in .env."},
+        }
+
+    try:
+        from github import Github
+        from api.github_app import create_fix_branch_pr
+        from api.project_indexer import get_project_dir
+
+        gh = Github(github_token)
+        repo = gh.get_repo(repo_name)
+        pr = repo.get_pull(pr_number)
+
+        # Ensure project clone is available on disk
+        project_id = record.project_id
+        if not project_id or not get_project_dir(project_id).exists():
+            return {
+                "summary": (
+                    f"The project workspace for '{repo_name}' is missing (server may have restarted). "
+                    f"Reindex the project first: 'Reindex {repo_name}', then retry."
+                ),
+                "render": {
+                    "kind": "error",
+                    "message": "Project workspace missing — reindex required before fix branch can be created.",
+                },
+            }
+
+        workdir_id = f"fixbranch_{record.id}"
+        workdir = _checkout_pr_base(project_id, pr.base.sha, workdir_id, base_ref=pr.base.ref)
+
+        loop = asyncio.get_event_loop()
+        fix_pr_url = await loop.run_in_executor(
+            None, create_fix_branch_pr,
+            repo, pr, record.file_reviews, workdir, github_token,
+        )
+        _cleanup_workdir(workdir_id)
+
+        if fix_pr_url:
+            return {
+                "summary": (
+                    f"Fix branch PR created: {fix_pr_url}. "
+                    f"Applied {len(clean_patches)} patch(es) to branch 'bot/fix-pr{pr_number}'."
+                ),
+                "render": {
+                    "kind": "fix_pr",
+                    "fix_pr_url": fix_pr_url,
+                    "patches_applied": len(clean_patches),
+                    "files": [fr.file_path for fr in clean_patches],
+                },
+            }
+        else:
+            return {
+                "summary": (
+                    "Could not push the fix branch. "
+                    "Verify that GITHUB_TOKEN has 'repo' write scope."
+                ),
+                "render": {"kind": "error", "message": "Fix branch push failed — check token permissions."},
+            }
+
+    except Exception as e:
+        return {
+            "summary": f"Error creating fix branch: {e}",
+            "render": {"kind": "error", "message": str(e)[:300]},
+        }
+
+
 # ============================================================================
 # Registry
 # ============================================================================
@@ -461,4 +591,5 @@ def build_tool_registry() -> dict[str, Callable[..., Awaitable[dict]]]:
         "fix_bug": tool_fix_bug,
         "refactor_code": tool_refactor_code,
         "recent_reviews": tool_recent_reviews,
+        "apply_review_fixes": tool_apply_review_fixes,
     }
