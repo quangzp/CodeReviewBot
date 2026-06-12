@@ -58,15 +58,19 @@ class Configs(BaseSettings):
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     TOGETHER_API_KEY: str = os.getenv("TOGETHER_API_KEY", "")
 
-    # Tri-backend LLM config (2 vLLM + 1 Groq fallback)
-    # fast_gate role: classifier + evaluator (small/fast model)
+    # Tri-role LLM config
+    # fast_gate: classifier + evaluator (small/fast model — binary decisions only)
     FAST_LLM_PROVIDER: str = os.getenv("FAST_LLM_PROVIDER", "groq")
     FAST_LLM_MODEL: str = os.getenv("FAST_LLM_MODEL", "llama-3.1-8b-instant")
-    # generation role: Phase 1-2-3 + reflexion (large model)
+    # chat: agent loop + tool routing (needs strong reasoning; defaults to fast_gate config)
+    CHAT_LLM_PROVIDER: str = os.getenv("CHAT_LLM_PROVIDER", "")  # empty = use FAST_LLM_PROVIDER
+    CHAT_LLM_MODEL: str = os.getenv("CHAT_LLM_MODEL", "")         # empty = use FAST_LLM_MODEL
+    # generation: fix_bug / refactor / planner / reviewer (large coding model)
     GEN_LLM_PROVIDER: str = os.getenv("GEN_LLM_PROVIDER", "")   # empty = use LLM_PROVIDER
     GEN_LLM_MODEL: str = os.getenv("GEN_LLM_MODEL", "")          # empty = use LLM_MODEL
-    # vLLM dual-endpoint config
+    # vLLM endpoint config
     VLLM_FAST_BASE: str = os.getenv("VLLM_FAST_BASE", "")
+    VLLM_CHAT_BASE: str = os.getenv("VLLM_CHAT_BASE", "")
     VLLM_GEN_BASE: str = os.getenv("VLLM_GEN_BASE", "")
 
     # Langfuse observability (opt-in — disabled by default)

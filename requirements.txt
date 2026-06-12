@@ -45,3 +45,6 @@ aiosqlite>=0.19.0
 
 # --- Observability (opt-in via LANGFUSE_ENABLED=true) ---
 langfuse>=2.0.0
+
+# --- Dev / testing ---
+pytest-cov>=4.0.0

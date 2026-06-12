@@ -1,0 +1,70 @@
+version: "3.9"
+
+# =============================================================================
+# GraphRAG Code Review Bot — Docker Compose
+#
+# Services:
+#   neo4j    — graph database (code graph + memory graph + vector index)
+#   backend  — FastAPI application
+#   frontend — React SPA served by nginx
+#
+# vLLM servers (GPU required) are NOT in this compose — run them separately:
+#   GPU 0: python -m vllm.entrypoints.openai.api_server \
+#             --model Qwen/Qwen2.5-Coder-32B-Instruct --port 8000
+#   GPU 1: python -m vllm.entrypoints.openai.api_server \
+#             --model deepseek-ai/DeepSeek-R1-Distill-Qwen-32B --port 8001
+# =============================================================================
+
+services:
+  neo4j:
+    image: neo4j:5.20
+    container_name: codereviewbot-neo4j
+    environment:
+      NEO4J_AUTH: ${APP_NEO4J_USER:-neo4j}/${APP_NEO4J_PASSWORD:?NEO4J password required}
+      NEO4J_PLUGINS: '["apoc"]'
+      NEO4J_dbms_memory_heap_initial__size: 512m
+      NEO4J_dbms_memory_heap_max__size: 2G
+    ports:
+      - "7474:7474"   # Browser UI
+      - "7687:7687"   # Bolt
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "${APP_NEO4J_USER:-neo4j}", "-p", "${APP_NEO4J_PASSWORD}", "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: codereviewbot-backend
+    env_file: .env
+    environment:
+      APP_NEO4J_URL: bolt://neo4j:7687
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data          # SQLite + repo clones persist across restarts
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: codereviewbot-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  neo4j_data:
+  neo4j_logs:

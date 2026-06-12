@@ -80,8 +80,8 @@ async def fix_bug_in_project(
             metadata={"repo": project.repo_name},
         ))
         _langfuse_active = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Langfuse trace setup skipped: %s", e)
 
     # Build the LLM + Neo4j driver
     llm = get_llm(role="generation", temperature=0)
@@ -195,7 +195,8 @@ async def fix_bug_in_project(
                             last_patch, last_error, graph_context, reflections,
                         )
                         reflections.append(reflection)
-                    except Exception:
+                    except Exception as _ref_err:
+                        logger.warning("[reflexion] Reflection generation failed (attempt %d): %s", attempt, _ref_err)
                         reflections.append(f"Previous failed: {last_error}")
 
                     patch = await loop.run_in_executor(

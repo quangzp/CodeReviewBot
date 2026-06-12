@@ -20,8 +20,11 @@ from __future__ import annotations
 
 import json
 import asyncio
+import logging
 import re
 from typing import AsyncGenerator, Optional
+
+logger = logging.getLogger(__name__)
 
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
@@ -172,8 +175,8 @@ async def run_agent_turn(
                 tags=["agent_chat"],
                 metadata={"message_preview": user_message[:80]},
             ))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Langfuse trace setup skipped: %s", e)
 
         # ----------------------------------------------------------------
         # 0. Intent classification — runs BEFORE the main agent LLM

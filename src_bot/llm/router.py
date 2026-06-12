@@ -190,9 +190,13 @@ def get_llm(
 
     # Role-based provider/model resolution — overrides env defaults when set
     if role and not provider and not model:
-        if role in ("fast_gate", "chat"):
+        if role == "fast_gate":
             provider = configs.FAST_LLM_PROVIDER or None
             model = configs.FAST_LLM_MODEL or None
+        elif role == "chat":
+            # chat prefers CHAT_LLM_* but falls back to FAST_LLM_* for backward compat
+            provider = configs.CHAT_LLM_PROVIDER or configs.FAST_LLM_PROVIDER or None
+            model = configs.CHAT_LLM_MODEL or configs.FAST_LLM_MODEL or None
         elif role == "generation":
             provider = configs.GEN_LLM_PROVIDER or None
             model = configs.GEN_LLM_MODEL or None
@@ -202,8 +206,11 @@ def get_llm(
 
     # vLLM base URL selection based on role
     vllm_base = ""
-    if role in ("fast_gate", "chat") and configs.VLLM_FAST_BASE:
+    if role == "fast_gate" and configs.VLLM_FAST_BASE:
         vllm_base = configs.VLLM_FAST_BASE
+    elif role == "chat" and (configs.VLLM_CHAT_BASE or configs.VLLM_GEN_BASE):
+        # chat shares the gen endpoint when no dedicated VLLM_CHAT_BASE is set
+        vllm_base = configs.VLLM_CHAT_BASE or configs.VLLM_GEN_BASE
     elif role == "generation" and configs.VLLM_GEN_BASE:
         vllm_base = configs.VLLM_GEN_BASE
 

@@ -105,8 +105,10 @@ class CodeVisitor(ast.NodeVisitor):
         self.nodes = []       # list of dicts: {type, name, file_path, content, docstring, lineno}
         self.calls = []       # list of (caller_name, callee_name)
         self.imports = []     # list of module names imported
+        self.inherits = []    # list of (child_class_name, parent_class_name)
         self._current_class = None
         self._current_func = None
+        self._method_counts: dict = {}  # class_name -> method count
 
     def _get_source(self, node) -> str:
         try:
@@ -127,6 +129,21 @@ class CodeVisitor(ast.NodeVisitor):
         prev_class = self._current_class
         self._current_class = node.name
         content = self._get_source(node)
+        end_line = getattr(node, "end_lineno", node.lineno)
+        line_count = max(1, end_line - node.lineno + 1)
+
+        for base in node.bases:
+            base_name = _extract_call_name_from_expr(base)
+            if base_name:
+                self.inherits.append((node.name, base_name))
+
+        method_count = sum(
+            1 for child in ast.walk(node)
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and child is not node
+        )
+        self._method_counts[node.name] = method_count
+
         self.nodes.append({
             "type": "Class",
             "name": node.name,
@@ -135,6 +152,8 @@ class CodeVisitor(ast.NodeVisitor):
             "content": content[:2000],
             "docstring": self._get_docstring(node),
             "lineno": node.lineno,
+            "line_count": line_count,
+            "method_count": method_count,
         })
         self.generic_visit(node)
         self._current_class = prev_class
@@ -151,6 +170,8 @@ class CodeVisitor(ast.NodeVisitor):
         self._current_func = qualified
 
         content = self._get_source(node)
+        end_line = getattr(node, "end_lineno", node.lineno)
+        line_count = max(1, end_line - node.lineno + 1)
         self.nodes.append({
             "type": "Method" if self._current_class else "Function",
             "name": node.name,
@@ -159,6 +180,7 @@ class CodeVisitor(ast.NodeVisitor):
             "content": content[:2000],
             "docstring": self._get_docstring(node),
             "lineno": node.lineno,
+            "line_count": line_count,
         })
 
         # Collect call relationships
@@ -185,6 +207,15 @@ def _extract_call_name(node: ast.Call) -> Optional[str]:
         return node.func.id
     elif isinstance(node.func, ast.Attribute):
         return node.func.attr
+    return None
+
+
+def _extract_call_name_from_expr(node) -> Optional[str]:
+    """Extract a simple name from a base-class expression (Name or Attribute)."""
+    if isinstance(node, ast.Name):
+        return node.id
+    elif isinstance(node, ast.Attribute):
+        return node.attr
     return None
 
 

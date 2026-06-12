@@ -33,6 +33,41 @@ def clear_trace_context() -> None:
 
 
 @contextmanager
+def langfuse_span(name: str, *, metadata: Optional[dict] = None):
+    """Create a Langfuse span around a pipeline phase.
+
+    No-op when LANGFUSE_ENABLED=false or langfuse is not installed.
+    Use inside an active langfuse_trace() context.
+    """
+    try:
+        from src_bot.config.config import configs
+        if not configs.LANGFUSE_ENABLED:
+            yield
+            return
+
+        from langfuse import Langfuse
+
+        ctx = get_trace_context()
+        if not ctx:
+            yield
+            return
+
+        langfuse = Langfuse(
+            public_key=configs.LANGFUSE_PUBLIC_KEY,
+            secret_key=configs.LANGFUSE_SECRET_KEY,
+            host=configs.LANGFUSE_HOST,
+        )
+        trace = langfuse.trace(id=ctx.trace_id)
+        span = trace.span(name=name, metadata=metadata or {})
+        try:
+            yield span
+        finally:
+            span.end()
+    except Exception:
+        yield
+
+
+@contextmanager
 def langfuse_trace(
     trace_id: str,
     *,

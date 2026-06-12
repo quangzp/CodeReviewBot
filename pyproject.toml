@@ -29,6 +29,20 @@ python_functions = ["test_*"]
 addopts = "-v --tb=short"
 filterwarnings = ["ignore::DeprecationWarning"]
 
+[tool.coverage.run]
+source = ["api", "src_bot", "swebench"]
+omit = [
+    "*/tests/*",
+    "*/data/*",
+    "run_swebench*",
+    "run_ingesting*",
+    "sanitize_swebench*",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 35
+
 [tool.mypy]
 python_version = "3.9"
 ignore_missing_imports = true

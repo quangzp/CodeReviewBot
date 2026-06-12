@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src_bot.config.config import configs
 from src_bot.llm.router import get_llm
+from src_bot.observability.langfuse_ctx import langfuse_span
 from api.models import ReviewRecord, FileReviewResult
 from api.database import update_review, get_project
 from api.project_indexer import get_project_dir
@@ -141,7 +142,8 @@ async def run_pr_review(
             metadata={"pr_url": record.pr_url, "repo": record.repo_name},
         ))
         _langfuse_active = True
-    except Exception:
+    except Exception as e:
+        logger.debug("Langfuse trace setup skipped: %s", e)
         _langfuse_active = False
 
     try:
@@ -315,10 +317,11 @@ async def run_pr_review(
 
                 # Phase 1: confirm the file (PR tells us which file; we sanity-check)
                 await emit("phase", {"phase": 1, "file": file_path, "status": "running"})
-                found_file = await loop.run_in_executor(
-                    None, phase1_localize_file,
-                    llm, issue_text, repo_name, workdir, session, project_id,
-                )
+                with langfuse_span("phase1_file_localization", metadata={"file": file_path}):
+                    found_file = await loop.run_in_executor(
+                        None, phase1_localize_file,
+                        llm, issue_text, repo_name, workdir, session, project_id,
+                    )
                 actual_file = file_path if (workdir / file_path).exists() else found_file
                 file_result.phase1_found = bool(actual_file)
                 await emit("phase", {
@@ -331,10 +334,11 @@ async def run_pr_review(
 
                 # Phase 2: fault localization (uses existing graph)
                 await emit("phase", {"phase": 2, "file": file_path, "status": "running"})
-                fault_desc, file_content = await loop.run_in_executor(
-                    None, phase2_localize_fault,
-                    llm, issue_text, actual_file, workdir, session, project_id,
-                )
+                with langfuse_span("phase2_fault_localization", metadata={"file": actual_file}):
+                    fault_desc, file_content = await loop.run_in_executor(
+                        None, phase2_localize_fault,
+                        llm, issue_text, actual_file, workdir, session, project_id,
+                    )
                 file_result.phase2_fault = fault_desc[:200]
                 await emit("phase", {
                     "phase": 2, "file": file_path,
@@ -347,13 +351,27 @@ async def run_pr_review(
                 # ── Harness: Risk Scoring (CHID) + Content Escalation + Context Budget ──
                 try:
                     from src_bot.risk.scorer import RiskScorer, RiskInput
+                    from src_bot.risk.git_enrichment import compute_file_stats, is_new_contributor as _is_new_contributor
+                    _git_stats = compute_file_stats(workdir, [actual_file])
+                    _fgs = _git_stats.get(actual_file)
+                    _is_new = _is_new_contributor(workdir, [actual_file], author_login)
                     _risk_result = RiskScorer().score(RiskInput(
                         blast_radius_size=len(changed_files),
                         pr_size_lines=getattr(changed_file, "changes", 0),
+                        bug_frequency=_fgs.bug_frequency if _fgs else 0,
+                        contributor_churn=_fgs.contributor_churn if _fgs else 0,
+                        is_new_contributor=_is_new,
                     ))
                     file_result.risk_level = _risk_result.level
-                except Exception:
-                    pass
+                    logger.debug(
+                        "[risk] %s → %s (score=%.2f, bug_freq=%d, churn=%d, new=%s)",
+                        actual_file, _risk_result.level, _risk_result.score,
+                        _fgs.bug_frequency if _fgs else 0,
+                        _fgs.contributor_churn if _fgs else 0,
+                        _is_new,
+                    )
+                except Exception as e:
+                    logger.warning("[risk] Risk scoring failed for %s: %s", actual_file, e)
 
                 # Content-based escalation: security-sensitive files → always high
                 _SECURITY_PATTERNS = {
@@ -380,15 +398,16 @@ async def run_pr_review(
 
                 # ── Phase 2.5: Planner — generate structured contract ─────────
                 from api.agent.planner import generate_plan_sync
-                _contract = await loop.run_in_executor(
-                    None,
-                    generate_plan_sync,
-                    fault_desc,
-                    issue_text,
-                    actual_file,
-                    graph_context,
-                    "bug_fix",
-                )
+                with langfuse_span("phase2_5_planner", metadata={"file": actual_file, "risk": file_result.risk_level}):
+                    _contract = await loop.run_in_executor(
+                        None,
+                        generate_plan_sync,
+                        fault_desc,
+                        issue_text,
+                        actual_file,
+                        graph_context,
+                        "bug_fix",
+                    )
                 _plan_context = _contract.to_prompt_section()
                 await emit("phase", {
                     "phase": 2.5, "file": file_path, "status": "planned",
@@ -409,11 +428,12 @@ async def run_pr_review(
                     })
 
                     if attempt == 1:
-                        patch = await loop.run_in_executor(
-                            None, phase3_generate_patch,
-                            llm, issue_text, actual_file, fault_desc, file_content,
-                            "", "", _plan_context,
-                        )
+                        with langfuse_span("phase3_patch_generation", metadata={"file": actual_file, "attempt": attempt}):
+                            patch = await loop.run_in_executor(
+                                None, phase3_generate_patch,
+                                llm, issue_text, actual_file, fault_desc, file_content,
+                                "", "", _plan_context,
+                            )
                     else:
                         try:
                             reflection = await loop.run_in_executor(
@@ -423,15 +443,17 @@ async def run_pr_review(
                                 last_patch, last_error, graph_context, reflections,
                             )
                             reflections.append(reflection)
-                        except Exception:
+                        except Exception as _ref_err:
+                            logger.warning("[reflexion] Reflection generation failed (attempt %d): %s", attempt, _ref_err)
                             reflection = f"Previous patch failed: {last_error}"
                             reflections.append(reflection)
 
-                        patch = await loop.run_in_executor(
-                            None, phase3_generate_patch,
-                            llm, issue_text, actual_file, fault_desc, file_content,
-                            reflection, last_patch, _plan_context,
-                        )
+                        with langfuse_span("phase3_patch_generation", metadata={"file": actual_file, "attempt": attempt}):
+                            patch = await loop.run_in_executor(
+                                None, phase3_generate_patch,
+                                llm, issue_text, actual_file, fault_desc, file_content,
+                                reflection, last_patch, _plan_context,
+                            )
 
                     if not patch:
                         last_error = "Empty patch generated"

@@ -113,8 +113,8 @@ async def refactor_code_in_project(
             metadata={"repo": project.repo_name},
         ))
         _langfuse_active = True
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Langfuse trace setup skipped: %s", e)
 
     llm = get_llm(role="generation", temperature=0)
     driver = GraphDatabase.driver(
@@ -177,8 +177,8 @@ async def refactor_code_in_project(
                             f"  - [{s.severity.upper()}] {s.smell_type}: {s.description}"
                         )
                     smell_context = "\n".join(smell_lines)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("[smell] Smell detection failed for %s: %s", file_path, e)
 
             if smell_context:
                 refactor_description = (

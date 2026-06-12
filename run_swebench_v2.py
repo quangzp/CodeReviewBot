@@ -297,6 +297,12 @@ def _extract_file_paths(response: str, repo_dir: Path) -> list[str]:
     return paths
 
 
+def _extract_file_path(response: str, repo_dir: Path) -> str:
+    """Single-path variant: returns the top candidate path (empty string if none found)."""
+    paths = _extract_file_paths(response, repo_dir)
+    return paths[0] if paths else ""
+
+
 # ---------------------------------------------------------------------------
 # Phase 2: Fault Localization (file content + graph context)
 # ---------------------------------------------------------------------------
@@ -897,7 +903,7 @@ def _verify_patch_applies(patch: str, repo_dir: Path) -> tuple[bool, str]:
         Path(patch_file).unlink(missing_ok=True)
 
 
-def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str) -> str:
+def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str, top_k: int = 15) -> str:
     """Get a concise graph context string for the reflector."""
     file_path = to_posix_path(file_path)
     try:
@@ -908,8 +914,8 @@ def _get_graph_context_for_file(neo4j_session, file_path: str, project_id: str) 
             RETURN n.name AS name, n.type AS type, n.lineno AS lineno,
                    collect(DISTINCT caller.name) AS called_by,
                    collect(DISTINCT callee.name) AS calls
-            LIMIT 15
-        """, fp=file_path, pid=project_id)
+            LIMIT $top_k
+        """, fp=file_path, pid=project_id, top_k=top_k)
         parts = []
         for r in results:
             line = f"  {r['type']}: {r['name']} (line {r['lineno']})"
@@ -1353,6 +1359,19 @@ def main():
         if gold_files & pred_files:
             right_file += 1
     print(f"Right file: {right_file}/{patched} ({100*right_file//max(patched,1)}%)")
+
+
+def phase1_localize_file(
+    llm,
+    issue_text: str,
+    repo_name: str,
+    repo_dir: Path,
+    neo4j_session,
+    project_id: str,
+) -> str:
+    """Single-file variant: returns the top candidate path (empty string if none found)."""
+    candidates = phase1_localize_files(llm, issue_text, repo_name, repo_dir, neo4j_session, project_id)
+    return candidates[0] if candidates else ""
 
 
 if __name__ == "__main__":

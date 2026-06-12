@@ -228,23 +228,10 @@ def run_swebench(
 
 
 def _run_with_graphrag(issue_text: str, repo_dir: Path) -> str:
-    """Run full GraphRAG + Reflexion pipeline via the bot."""
-    from src_bot.bot import GraphRAGBot
-
-    bot = GraphRAGBot()
-    try:
-        bot.initialize()
-        result = bot.invoke({
-            "pr_diff": "",  # No PR diff in SWE-bench mode
-            "issue_text": issue_text,
-            "repo_path": str(repo_dir),
-        })
-        return result.get("generated_patch", "")
-    except Exception as e:
-        print(f"  GraphRAG pipeline error: {e}")
-        return ""
-    finally:
-        bot.close()
+    """Stub — superseded by run_swebench_v2.py which uses the full pipeline."""
+    raise NotImplementedError(
+        "_run_with_graphrag is deprecated. Use run_swebench_v2.py instead."
+    )
 
 
 def _run_llm_only(issue_text: str, repo_dir: Path) -> str:
