@@ -234,6 +234,14 @@ def analyze_fault_node(state: HarnessState) -> dict:
     file_path = state["file_path"]
     workdir = Path(state["workdir"])
 
+    # If orchestrator routed us here via "reanalyze", increment the counter so
+    # _route_after_orchestrate's guard (`reanalyze_count < 1`) fires correctly
+    # on the next orchestrator pass. Without this the counter stays 0 forever
+    # and reanalysis loops until _MAX_TOTAL_STEPS.
+    reanalyze_count = state.get("reanalyze_count", 0)
+    if state.get("orchestrator_decision") == "reanalyze":
+        reanalyze_count += 1
+
     # Read file from disk
     try:
         file_content = (workdir / file_path).read_text(errors="ignore")
@@ -292,6 +300,7 @@ def analyze_fault_node(state: HarnessState) -> dict:
     return {
         "fault_desc": fault_desc,
         "file_content": file_content,
+        "reanalyze_count": reanalyze_count,
         "events": [("phase", {
             "phase": 2, "file": file_path,
             "fault": fault_desc[:120], "status": "done",

@@ -1,0 +1,15 @@
+
+> codereviewbot-frontend@1.0.0 test
+> vitest run
+
+
+ RUN  v1.6.1 /Users/manhnguyen/Project/CodeReviewBot/frontend
+
+ ✓ src/components/StatusBadge.test.tsx  (9 tests) 24ms
+ ✓ src/components/RiskBadge.test.tsx  (12 tests) 27ms
+
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+   Start at  01:51:00
+   Duration  1.05s (transform 54ms, setup 106ms, collect 316ms, tests 51ms, environment 649ms, prepare 114ms)
+

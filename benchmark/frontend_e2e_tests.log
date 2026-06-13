@@ -1,0 +1,21 @@
+
+> codereviewbot-frontend@1.0.0 test:e2e
+> playwright test
+
+
+Running 13 tests using 5 workers
+
+[1A[2K[1/13] [chromium] › e2e/chat.spec.ts:14:3 › Chat interface › shows send button
+[1A[2K[2/13] [chromium] › e2e/chat.spec.ts:10:3 › Chat interface › shows chat input
+[1A[2K[3/13] [chromium] › e2e/chat.spec.ts:38:3 › Chat interface › renders project list card from tool result
+[1A[2K[4/13] [chromium] › e2e/chat.spec.ts:64:3 › Chat interface › shows error message when review fails
+[1A[2K[5/13] [chromium] › e2e/chat.spec.ts:18:3 › Chat interface › sends message and receives text response
+[1A[2K[6/13] [chromium] › e2e/chat.spec.ts:82:3 › Chat interface › send button disabled when input is empty
+[1A[2K[7/13] [chromium] › e2e/projects.spec.ts:10:3 › Projects page › shows project list
+[1A[2K[8/13] [chromium] › e2e/projects.spec.ts:20:3 › Projects page › shows node counts
+[1A[2K[9/13] [chromium] › e2e/projects.spec.ts:15:3 › Projects page › shows indexed status for all projects
+[1A[2K[10/13] [chromium] › e2e/projects.spec.ts:32:3 › Review detail page › shows PR number and repo name
+[1A[2K[11/13] [chromium] › e2e/projects.spec.ts:41:3 › Review detail page › shows patch count
+[1A[2K[12/13] [chromium] › e2e/projects.spec.ts:37:3 › Review detail page › shows completed status
+[1A[2K[13/13] [chromium] › e2e/projects.spec.ts:45:3 › Review detail page › shows fault description
+[1A[2K  13 passed (2.3s)

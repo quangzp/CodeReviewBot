@@ -113,8 +113,11 @@ def verify_patch(
         return VerificationResult(ast_result=ast_result, test_result=test_result)
 
     # Gate 3: LLM quality evaluation
-    llm_score = 3
-    llm_reason = "not evaluated"
+    # Default to 0 (not 3) so an LLM exception does not silently pass the gate.
+    # "evaluation unavailable" ≠ "approved" — the orchestrator handles 0-score
+    # patches via accept_best/reanalyze/abort rather than auto-approving them.
+    llm_score = 0
+    llm_reason = "LLM evaluation unavailable"
     try:
         from api.agent.evaluator import evaluate_patch_with_contract, evaluate_patch
         description = bug_description
@@ -127,8 +130,11 @@ def verify_patch(
             )
         else:
             llm_score, llm_reason = evaluate_patch(description, patch_diff, mode)
-    except Exception:
-        pass
+    except Exception as _eval_exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "[verify] LLM evaluator failed (non-fatal, score=0): %s", _eval_exc
+        )
 
     return VerificationResult(
         ast_result=ast_result,
