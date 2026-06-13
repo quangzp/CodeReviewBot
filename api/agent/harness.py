@@ -1,11 +1,11 @@
 """
-LangGraph per-file review harness — true Harness Engineering.
+LangGraph per-file review harness — hub-and-spoke orchestration.
 
 Implements all five Anthropic harness principles
 (anthropic.com/engineering/harness-design-long-running-apps):
 
-  1. Loop management    — hard step cap (_MAX_TOTAL_STEPS), clean exit conditions,
-                          reanalyze allowed at most once per run
+  1. Loop management    — hard step cap (_MAX_TOTAL_STEPS), deterministic pre-checks,
+                          GPT orchestrator decides when to stop
   2. LLM failures       — error categorisation (fatal / transient), each node never
                           raises; transient failures degrade gracefully
   3. Tool call patterns — verify_node wrapped with per-call timeout; git apply uses
@@ -17,11 +17,25 @@ Implements all five Anthropic harness principles
                           evaluator uses fast_gate model (8B) separate from generator
                           (70B); PlannerContract acceptance criteria wired through
 
+Graph topology — hub-and-spoke (GPT-4o is the routing hub):
+
+    orchestrate (GPT-4o) ──┬──→ analyze_fault (DeepSeek reason) ──┐
+         ↑                 ├──→ code_review   (Groq fast_gate)    │
+         │                 ├──→ plan          (DeepSeek reason)   │
+         └─────────────────├──→ generate      (Qwen generation)   ┤
+                           ├──→ verify        (Groq fast_gate)    │
+                           ├──→ reflect       (DeepSeek reason)   │
+                           └──→ END                               ┘
+
+GPT-4o sees the full pipeline state at every junction and decides the
+next worker node. No edges are hardcoded between workers — GPT routes
+dynamically based on what has been completed and what the state shows.
+
 Self-evaluation bias mitigation (article 1):
-  - Generator: role="generation" (llama-3.3-70b)
-  - Evaluator: role="fast_gate"  (llama-3.1-8b) — independent, different model
-  - Orchestrator: role="reason"  (deepseek-r1)  — process decision, NOT quality eval;
-    external anchor = contract acceptance_criteria + deterministic pre-accept check
+  - Analyzer / Planner / Reflector: role="reason"     (DeepSeek-R1-32B) — deep reasoning
+  - Generator:                       role="generation" (Qwen2.5-Coder-32B) — code writing
+  - Evaluator:                       role="fast_gate"  (Groq llama-3.1-8b) — independent 8B
+  - Orchestrator:                    role="chat"       (GPT-4o) — dynamic hub router
 
 Anti-patterns avoided:
   - Environmental degradation: pre-flight check before graph starts
@@ -87,7 +101,7 @@ def _node_start_metadata(state: dict) -> dict:
         "attempt": state.get("attempt", 0),
         "max_retries": state.get("max_retries"),
         "total_steps": state.get("total_steps", 0),
-        "reanalyze_count": state.get("reanalyze_count", 0),
+        "completed_steps_count": _safe_len(state.get("completed_steps", [])),
         "has_graph_context": bool(state.get("graph_context")),
         "reflections_count": _safe_len(state.get("reflections", [])),
         "patches_tried_count": _safe_len(state.get("patches_tried", [])),
@@ -140,8 +154,86 @@ def _node_result_metadata(result: Any) -> dict:
     return metadata
 
 
+def _node_span_input(name: str, state: dict) -> dict:
+    """Build a compact, node-specific input dict for the Langfuse span."""
+    base = {
+        "file": state.get("file_path"),
+        "attempt": state.get("attempt", 0),
+        "risk": state.get("risk_level"),
+    }
+    if name == "analyze_fault":
+        base["issue"] = (state.get("issue_text") or "")[:300]
+        base["reanalyze"] = state.get("orchestrator_decision") == "reanalyze"
+    elif name == "code_review":
+        base["fault"] = (state.get("fault_desc") or "")[:300]
+    elif name == "plan":
+        base["fault"] = (state.get("fault_desc") or "")[:300]
+    elif name == "generate":
+        base["fault"] = (state.get("fault_desc") or "")[:300]
+        base["has_plan"] = bool(state.get("plan_context"))
+        base["reflection_count"] = _safe_len(state.get("reflections", []))
+    elif name == "verify":
+        base["patch_size"] = len(state.get("patch") or "")
+    elif name == "reflect":
+        base["failure_reason"] = (state.get("verification_reason") or "")[:300]
+        base["score"] = state.get("eval_score", 0)
+    elif name == "orchestrate":
+        completed = state.get("completed_steps", [])
+        step_counts: dict[str, int] = {}
+        for s in completed:
+            step_counts[s] = step_counts.get(s, 0) + 1
+        base["completed"] = step_counts
+        base["score"] = state.get("eval_score", 0)
+        base["verification_passed"] = state.get("verification_passed", False)
+        base["applies_cleanly"] = state.get("applies_cleanly", False)
+    return base
+
+
+def _node_span_output(name: str, result: dict) -> dict:
+    """Build a clear, node-specific output dict for the Langfuse span."""
+    out: dict[str, Any] = {"node": name}
+    if name == "analyze_fault":
+        out["fault"] = (result.get("fault_desc") or "")[:400]
+    elif name == "code_review":
+        out["comments_count"] = _safe_len(result.get("review_comments", []))
+        comments = result.get("review_comments") or []
+        if comments:
+            out["severities"] = [c.get("severity") for c in comments[:5]]
+    elif name == "plan":
+        contract = result.get("plan_contract") or {}
+        out["root_cause"] = (contract.get("root_cause") or "")[:300]
+        out["criteria_count"] = _safe_len(contract.get("acceptance_criteria", []))
+        out["files_to_modify"] = contract.get("files_to_modify", [])
+    elif name == "generate":
+        out["patch_size"] = len(result.get("patch") or "")
+        out["attempt"] = result.get("attempt", 0)
+    elif name == "verify":
+        out["passed"] = result.get("verification_passed", False)
+        out["score"] = result.get("eval_score", 0)
+        out["reason"] = (result.get("verification_reason") or "")[:300]
+        out["applies_cleanly"] = result.get("applies_cleanly", False)
+    elif name == "reflect":
+        reflections = result.get("reflections") or []
+        out["reflection"] = (reflections[0] if reflections else "")[:400]
+    elif name == "orchestrate":
+        action = result.get("next_action", "done")
+        out["next_action"] = action
+        out["action_label"] = {
+            "analyze_fault": "🔍 analyze_fault",
+            "code_review":   "👁 code_review",
+            "plan":          "📋 plan",
+            "generate":      "⚙️ generate",
+            "verify":        "🧪 verify",
+            "reflect":       "🔄 reflect",
+            "done":          "✅ done",
+        }.get(action, action)
+        if result.get("orchestrator_decision"):
+            out["final_decision"] = result["orchestrator_decision"]
+    return out
+
+
 def _instrument_node(name: str):
-    """Wrap a LangGraph node in a Langfuse span without changing behavior."""
+    """Wrap a LangGraph node in a Langfuse span with clear input/output."""
     def decorator(fn):
         @wraps(fn)
         def wrapper(state: HarnessState) -> dict:
@@ -150,16 +242,16 @@ def _instrument_node(name: str):
                 langfuse_update_current_span,
             )
 
-            with langfuse_span(f"harness.{name}", metadata=_node_start_metadata(state)):
+            with langfuse_span(
+                f"harness.{name}",
+                input=_node_span_input(name, state),
+                metadata=_node_start_metadata(state),
+            ):
                 try:
                     result = fn(state)
                     langfuse_update_current_span(
+                        output=_node_span_output(name, result) if isinstance(result, dict) else {"node": name},
                         metadata=_node_result_metadata(result),
-                        output={
-                            "node": name,
-                            "status": "done",
-                            "events": _safe_len(result.get("events", [])) if isinstance(result, dict) else 0,
-                        },
                     )
                     return result
                 except Exception as e:
@@ -303,6 +395,7 @@ class HarnessState(TypedDict):
     patches_tried: Annotated[list[str], operator.add]
     failure_reasons: Annotated[list[str], operator.add]
     events: Annotated[list, operator.add]
+    completed_steps: Annotated[list[str], operator.add]  # full call history for orchestrator
 
     # ── Mutable per iteration ──────────────────────────────────────────────
     fault_desc: str
@@ -317,8 +410,9 @@ class HarnessState(TypedDict):
     eval_score: int
     attempt: int                 # attempts within current analysis cycle
     total_steps: int             # global step counter — hard cap _MAX_TOTAL_STEPS
-    reanalyze_count: int
-    orchestrator_decision: str   # "accept_best" | "reanalyze" | "abort"
+    reanalyze_count: int         # kept for backward compat; not used in hub-and-spoke routing
+    next_action: str             # orchestrator's routing decision (set by orchestrate_node)
+    orchestrator_decision: str   # "accept_best" | "abort" — only set when next_action=="done"
 
 
 # ---------------------------------------------------------------------------
@@ -338,14 +432,6 @@ def analyze_fault_node(state: HarnessState) -> dict:
     file_path = state["file_path"]
     workdir = Path(state["workdir"])
 
-    # If orchestrator routed us here via "reanalyze", increment the counter so
-    # _route_after_orchestrate's guard (`reanalyze_count < 1`) fires correctly
-    # on the next orchestrator pass. Without this the counter stays 0 forever
-    # and reanalysis loops until _MAX_TOTAL_STEPS.
-    reanalyze_count = state.get("reanalyze_count", 0)
-    if state.get("orchestrator_decision") == "reanalyze":
-        reanalyze_count += 1
-
     # Read file from disk
     try:
         file_content = (workdir / file_path).read_text(errors="ignore")
@@ -353,6 +439,8 @@ def analyze_fault_node(state: HarnessState) -> dict:
         return {
             "fault_desc": f"Could not read file: {e}",
             "file_content": "",
+            "completed_steps": ["analyze_fault"],
+            "total_steps": state.get("total_steps", 0) + 1,
             "events": [("phase", {"phase": 2, "file": file_path, "status": "error", "error": str(e)})],
         }
 
@@ -404,7 +492,8 @@ def analyze_fault_node(state: HarnessState) -> dict:
     return {
         "fault_desc": fault_desc,
         "file_content": file_content,
-        "reanalyze_count": reanalyze_count,
+        "completed_steps": ["analyze_fault"],
+        "total_steps": state.get("total_steps", 0) + 1,
         "events": [("phase", {
             "phase": 2, "file": file_path,
             "fault": fault_desc[:120], "status": "done",
@@ -434,7 +523,11 @@ def code_review_node(state: HarnessState) -> dict:
     fault_desc = state.get("fault_desc", "")
 
     if not file_content:
-        return {"review_comments": []}
+        return {
+            "review_comments": [],
+            "completed_steps": ["code_review"],
+            "total_steps": state.get("total_steps", 0) + 1,
+        }
 
     # First 100 lines with line numbers — enough for structural review
     lines = file_content.split("\n")
@@ -471,6 +564,8 @@ def code_review_node(state: HarnessState) -> dict:
                 })
             return {
                 "review_comments": clean,
+                "completed_steps": ["code_review"],
+                "total_steps": state.get("total_steps", 0) + 1,
                 "events": [("review_comments", {
                     "file": file_path,
                     "comments": clean,
@@ -479,7 +574,11 @@ def code_review_node(state: HarnessState) -> dict:
     except Exception as e:
         logger.warning("[harness] code_review_node error (non-fatal): %s", e)
 
-    return {"review_comments": []}
+    return {
+        "review_comments": [],
+        "completed_steps": ["code_review"],
+        "total_steps": state.get("total_steps", 0) + 1,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -524,6 +623,8 @@ def plan_node(state: HarnessState) -> dict:
     return {
         "plan_context": plan_context,
         "plan_contract": plan_contract,
+        "completed_steps": ["plan"],
+        "total_steps": state.get("total_steps", 0) + 1,
         "events": [("phase", {
             "phase": 2.5, "file": file_path, "status": "planned",
             "root_cause": root_cause_short,
@@ -597,6 +698,7 @@ def generate_node(state: HarnessState) -> dict:
         "attempt": attempt,
         "total_steps": total_steps,
         "patches_tried": [patch] if patch else [],
+        "completed_steps": ["generate"],
         "events": events,
     }
 
@@ -638,6 +740,8 @@ def verify_node(state: HarnessState) -> dict:
             "verification_reason": reason,
             "eval_score": 0,
             "failure_reasons": [reason],
+            "completed_steps": ["verify"],
+            "total_steps": state.get("total_steps", 0) + 1,
             "events": [("phase", {"phase": 3, "file": file_path, "attempt": attempt, "status": "empty"})],
         }
 
@@ -651,6 +755,8 @@ def verify_node(state: HarnessState) -> dict:
             "verification_reason": reason,
             "eval_score": 0,
             "failure_reasons": [reason],
+            "completed_steps": ["verify"],
+            "total_steps": state.get("total_steps", 0) + 1,
             "events": [("phase", {
                 "phase": 3, "file": file_path, "attempt": attempt,
                 "status": "apply_failed", "error": apply_error[:100],
@@ -689,6 +795,8 @@ def verify_node(state: HarnessState) -> dict:
             "verification_reason": reason,
             "eval_score": 0,
             "failure_reasons": [reason],
+            "completed_steps": ["verify"],
+            "total_steps": state.get("total_steps", 0) + 1,
             "events": [("phase", {"phase": 3, "file": file_path, "attempt": attempt, "status": "timeout"})],
         }
     except Exception as e:
@@ -700,6 +808,8 @@ def verify_node(state: HarnessState) -> dict:
             "verification_reason": reason,
             "eval_score": 0,
             "failure_reasons": [str(e)],
+            "completed_steps": ["verify"],
+            "total_steps": state.get("total_steps", 0) + 1,
             "events": [("phase", {"phase": 3, "file": file_path, "attempt": attempt, "status": "verify_error"})],
         }
 
@@ -725,6 +835,8 @@ def verify_node(state: HarnessState) -> dict:
         "verification_reason": rejection or llm_reason,
         "eval_score": llm_score,
         "failure_reasons": [] if passed else [rejection or "verification failed"],
+        "completed_steps": ["verify"],
+        "total_steps": state.get("total_steps", 0) + 1,
         "events": events,
     }
 
@@ -766,6 +878,8 @@ def reflect_node(state: HarnessState) -> dict:
 
     return {
         "reflections": [reflection],
+        "completed_steps": ["reflect"],
+        "total_steps": state.get("total_steps", 0) + 1,
         "events": [("phase", {
             "phase": 3, "file": file_path,
             "attempt": state["attempt"], "status": "reflecting",
@@ -774,111 +888,172 @@ def reflect_node(state: HarnessState) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Node: orchestrate  ← HARNESS CORE (reason LLM makes process decision)
+# Node: orchestrate  ← HARNESS CORE (GPT-4o dynamic routing hub)
 # ---------------------------------------------------------------------------
+
+def _resolve_final_decision(state: dict) -> str:
+    """Determine accept_best vs abort when the orchestrator decides to finish."""
+    if state.get("verification_passed"):
+        return "accept_best"
+    if state.get("applies_cleanly") and state.get("eval_score", 0) >= 2:
+        return "accept_best"
+    if state.get("patches_tried"):
+        return "accept_best"  # best-effort: ship the last attempt
+    return "abort"
+
+
+def _fallback_action(state: dict, step_counts: dict) -> str:
+    """Deterministic routing fallback when GPT is unavailable."""
+    if not state.get("fault_desc"):
+        return "analyze_fault"
+    if not state.get("review_comments") and step_counts.get("code_review", 0) == 0:
+        return "code_review"
+    if not state.get("plan_contract") and step_counts.get("plan", 0) == 0:
+        return "plan"
+    if not state.get("patch"):
+        return "generate"
+    attempt = state.get("attempt", 0)
+    max_retries = state.get("max_retries", 3)
+    if not state.get("verification_passed") and attempt < max_retries:
+        return "reflect" if state.get("patches_tried") else "generate"
+    return "done"
+
+
+_ORCHESTRATE_LABELS = {
+    "analyze_fault": "🔍 analyze_fault",
+    "code_review":   "👁 code_review",
+    "plan":          "📋 plan",
+    "generate":      "⚙️ generate",
+    "verify":        "🧪 verify",
+    "reflect":       "🔄 reflect",
+    "done":          "✅ done",
+}
+
+_ORCHESTRATE_VALID = frozenset(_ORCHESTRATE_LABELS)
+
 
 @_instrument_node("orchestrate")
 def orchestrate_node(state: HarnessState) -> dict:
-    """
-    Reason LLM makes a process decision after exhausting the retry budget.
+    """GPT-4o routing hub — decides next action at every junction.
+
+    Runs first (entry point) and after every worker node. GPT sees the full
+    pipeline state and picks one of 7 actions or "done". The prompt is purely
+    descriptive — GPT is given the state, not instructions on how to route.
 
     Self-evaluation bias mitigation (article 1):
-      - The orchestrator is NOT asked "is this patch good?" (quality judgment)
-      - It IS asked "given these process failures, what's the right move?"
-      - External anchor: PlannerContract acceptance_criteria are included so
-        the decision references explicit criteria rather than implicit LLM taste
-      - Deterministic pre-check runs first: if eval_score >= 2 AND applies_cleanly,
-        we auto-accept without invoking the LLM at all
-
-    Context compaction: only last _PROMPT_MAX_* entries injected into prompt.
-
-    Decisions:
-      "accept_best" — best-effort patch; ship despite failing automated checks
-      "reanalyze"   — fault analysis was wrong; restart with a fresh angle
-      "abort"        — cannot fix automatically; skip this file
+      - Deterministic pre-check: verified patch → auto-accept, no LLM call
+      - Hard cap guard: total_steps >= _MAX_TOTAL_STEPS → force done
+      - GPT sees WHAT has been done (step_counts), not HOW to do it
+      - PlannerContract acceptance_criteria included when state has a contract
     """
     from src_bot.llm.router import get_llm
     from langchain_core.messages import HumanMessage
 
     file_path = state["file_path"]
+    completed = state.get("completed_steps", [])
+    total_steps = state.get("total_steps", 0)
 
-    # Deterministic pre-check: auto-accept if we have a workable patch
-    if state.get("eval_score", 0) >= 2 and state.get("applies_cleanly", False):
-        decision = "accept_best"
-        logger.info(
-            "[harness] orchestrator auto-accept (score=%d, applies_cleanly) for %s",
-            state["eval_score"], file_path,
+    # Hard cap — prevent runaway loop
+    if total_steps >= _MAX_TOTAL_STEPS:
+        logger.warning(
+            "[harness] Hard step cap (%d) reached for %s", total_steps, file_path
         )
+        final_decision = _resolve_final_decision(state)
         return {
-            "orchestrator_decision": decision,
+            "next_action": "done",
+            "orchestrator_decision": final_decision,
             "events": [("orchestrate", {
-                "file": file_path, "decision": decision, "auto": True,
-                "message": f"Auto-accepting: score={state['eval_score']}/5, applies cleanly",
+                "file": file_path, "next_action": "done",
+                "action_label": _ORCHESTRATE_LABELS["done"],
+                "reason": "hard_cap", "final_decision": final_decision,
             })],
         }
 
-    # Context compaction — trim accumulated lists before injecting into prompt
-    patches_section = _compact_for_prompt(
-        state["patches_tried"], _PROMPT_MAX_PATCHES, 300, "patch"
-    )
-    failures_section = _compact_for_prompt(
-        state["failure_reasons"], _PROMPT_MAX_FAILURES, 200, "fail"
-    )
-    reflections_section = _compact_for_prompt(
-        state["reflections"], _PROMPT_MAX_REFLECTIONS, 250, "reflect"
-    )
+    # Deterministic pre-check: skip LLM if patch already verified
+    if state.get("verification_passed") and state.get("applies_cleanly"):
+        logger.info("[harness] Orchestrator auto-accept (verified) for %s", file_path)
+        return {
+            "next_action": "done",
+            "orchestrator_decision": "accept_best",
+            "events": [("orchestrate", {
+                "file": file_path, "next_action": "done",
+                "action_label": _ORCHESTRATE_LABELS["done"],
+                "auto": True, "final_decision": "accept_best",
+                "message": f"patch verified score={state.get('eval_score', 0)}/5",
+            })],
+        }
 
-    # Include contract acceptance criteria as external anchor (reduces self-eval bias)
-    criteria_section = ""
-    contract_dict = state.get("plan_contract", {})
-    if contract_dict.get("acceptance_criteria"):
-        criteria_section = (
-            "\nACCEPTANCE CRITERIA (from sprint contract):\n"
-            + "\n".join(f"  ✓ {c}" for c in contract_dict["acceptance_criteria"])
+    # Build step counts for GPT context
+    step_counts: dict[str, int] = {}
+    for s in completed:
+        step_counts[s] = step_counts.get(s, 0) + 1
+
+    fault_desc = state.get("fault_desc", "")
+    patch = state.get("patch", "")
+    plan_contract = state.get("plan_contract") or {}
+    attempt = state.get("attempt", 0)
+    max_retries = state.get("max_retries", 3)
+    eval_score = state.get("eval_score", 0)
+
+    criteria_hint = ""
+    if plan_contract.get("acceptance_criteria"):
+        criteria_hint = (
+            "\nFix contract criteria:\n"
+            + "\n".join(f"  - {c}" for c in plan_contract["acceptance_criteria"][:3])
             + "\n"
         )
 
     prompt = (
-        f"You are a tech lead making a PROCESS decision — not a code quality judgment.\n"
-        f"The automated fix pipeline failed all {state['attempt']} attempt(s) for this file.\n\n"
+        f"You orchestrate a multi-agent code fix pipeline. Decide the NEXT single action.\n\n"
         f"FILE: {file_path}\n"
-        f"ISSUE SUMMARY: {state['issue_text'][:400]}\n"
-        f"FAULT IDENTIFIED: {state['fault_desc'][:300]}\n"
-        f"{criteria_section}\n"
-        f"PATCHES TRIED:\n{patches_section}\n\n"
-        f"FAILURE REASONS:\n{failures_section}\n\n"
-        f"REFLECTIONS:\n{reflections_section}\n\n"
-        f"Choose EXACTLY ONE process action — reply with only the keyword:\n"
-        f"  'accept_best'  best patch is reasonable despite failing automated checks\n"
-        f"  'reanalyze'   fault analysis was wrong; needs fresh perspective from scratch\n"
-        f"  'abort'        cannot be fixed automatically; skip this file\n\n"
-        f"Process decision:"
+        f"ISSUE: {state['issue_text'][:300]}\n\n"
+        f"PIPELINE STATE:\n"
+        f"- Steps completed: {dict(step_counts) or 'none'}\n"
+        f"- fault_desc: {'set (' + fault_desc[:100] + ')' if fault_desc else 'NOT YET'}\n"
+        f"- review_comments: {len(state.get('review_comments') or [])} comments\n"
+        f"- plan_contract: {'set' if plan_contract else 'NOT YET'}\n"
+        f"- patch: {'generated (size={:d})'.format(len(patch)) if patch else 'NOT YET'}\n"
+        f"- verification: {'✅ PASSED' if state.get('verification_passed') else ('❌ FAILED score=' + str(eval_score) + '/5 — ' + (state.get('verification_reason') or '')[:80] if patch else 'not run')}\n"
+        f"- attempts: {attempt}/{max_retries}\n"
+        f"- total_steps: {total_steps}/{_MAX_TOTAL_STEPS}\n"
+        f"{criteria_hint}\n"
+        f"AVAILABLE ACTIONS:\n"
+        f"  analyze_fault  — identify exact fault (run {step_counts.get('analyze_fault', 0)}x; max 2x)\n"
+        f"  code_review    — structured review comments (run {step_counts.get('code_review', 0)}x)\n"
+        f"  plan           — create fix contract (run {step_counts.get('plan', 0)}x)\n"
+        f"  generate       — write patch (run {step_counts.get('generate', 0)}x)\n"
+        f"  verify         — test patch (run {step_counts.get('verify', 0)}x)\n"
+        f"  reflect        — critique failed patch (run {step_counts.get('reflect', 0)}x)\n"
+        f"  done           — finish pipeline\n\n"
+        f"Reply with EXACTLY one keyword:"
     )
 
-    llm = get_llm(role="reason", temperature=0)
+    llm = get_llm(role="chat", temperature=0)  # GPT-4o: orchestrator
     try:
         response = llm.invoke([HumanMessage(content=prompt)])
         raw = (response.content or "").strip().lower().split()[0]
-        decision = raw if raw in ("accept_best", "reanalyze", "abort") else "accept_best"
+        action = raw if raw in _ORCHESTRATE_VALID else _fallback_action(state, step_counts)
     except Exception as e:
-        logger.warning("[harness] orchestrate_node LLM error: %s — defaulting accept_best", e)
-        decision = "accept_best"
+        logger.warning("[harness] orchestrate_node LLM error: %s — using fallback", e)
+        action = _fallback_action(state, step_counts)
+
+    final_decision = _resolve_final_decision(state) if action == "done" else ""
 
     logger.info(
-        "[harness] orchestrator → %s (file=%s attempts=%d total_steps=%d)",
-        decision, file_path, state["attempt"], state.get("total_steps", 0),
+        "[harness] orchestrator → %s (file=%s steps=%d attempts=%d)",
+        action, file_path, total_steps, attempt,
     )
 
     return {
-        "orchestrator_decision": decision,
+        "next_action": action,
+        "orchestrator_decision": final_decision,
         "events": [("orchestrate", {
-            "file": file_path, "decision": decision, "auto": False,
-            "attempts": state["attempt"],
-            "message": {
-                "accept_best": "Orchestrator: accepting best patch (best-effort)",
-                "reanalyze": "Orchestrator: restarting fault analysis from scratch",
-                "abort": "Orchestrator: file cannot be fixed automatically",
-            }.get(decision, decision),
+            "file": file_path,
+            "next_action": action,
+            "action_label": _ORCHESTRATE_LABELS.get(action, action),
+            "step_counts": step_counts,
+            "total_steps": total_steps,
+            **({"final_decision": final_decision} if action == "done" else {}),
         })],
     }
 
@@ -887,30 +1062,12 @@ def orchestrate_node(state: HarnessState) -> dict:
 # Routing
 # ---------------------------------------------------------------------------
 
-def _route_after_verify(state: HarnessState) -> str:
-    # Hard global cap — article 1: "only increase complexity when needed"
+def _route_from_orchestrate(state: HarnessState) -> str:
+    """Hub router — translates GPT's next_action into a graph edge."""
     if state.get("total_steps", 0) >= _MAX_TOTAL_STEPS:
-        logger.warning(
-            "[harness] Hard step cap reached (%d steps) for %s — forcing orchestrate",
-            _MAX_TOTAL_STEPS, state["file_path"],
-        )
-        return "orchestrate"
-
-    if state["verification_passed"]:
         return "done"
-
-    if state["attempt"] < state["max_retries"]:
-        return "reflect_and_retry"
-
-    return "orchestrate"
-
-
-def _route_after_orchestrate(state: HarnessState) -> str:
-    decision = state.get("orchestrator_decision", "abort")
-    # Allow at most one reanalysis cycle — prevents infinite loops
-    if decision == "reanalyze" and state.get("reanalyze_count", 0) < 1:
-        return "reanalyze"
-    return "done"
+    action = state.get("next_action", "done")
+    return action if action in _ORCHESTRATE_VALID else "done"
 
 
 # ---------------------------------------------------------------------------
@@ -922,40 +1079,36 @@ def _build_graph():
 
     g = StateGraph(HarnessState)
 
+    # Hub node — GPT-4o decides routing at every junction
+    g.add_node("orchestrate", orchestrate_node)
+
+    # Worker nodes
     g.add_node("analyze_fault", analyze_fault_node)
     g.add_node("code_review", code_review_node)
     g.add_node("plan", plan_node)
     g.add_node("generate", generate_node)
     g.add_node("verify", verify_node)
     g.add_node("reflect", reflect_node)
-    g.add_node("orchestrate", orchestrate_node)
 
-    g.set_entry_point("analyze_fault")
-    g.add_edge("analyze_fault", "code_review")
-    g.add_edge("code_review", "plan")
-    g.add_edge("plan", "generate")
-    g.add_edge("generate", "verify")
-
-    g.add_conditional_edges(
-        "verify",
-        _route_after_verify,
-        {
-            "done": END,
-            "reflect_and_retry": "reflect",
-            "orchestrate": "orchestrate",
-        },
-    )
-
-    g.add_edge("reflect", "generate")
-
+    # GPT orchestrator is the entry point and the routing hub
+    g.set_entry_point("orchestrate")
     g.add_conditional_edges(
         "orchestrate",
-        _route_after_orchestrate,
+        _route_from_orchestrate,
         {
-            "done": END,
-            "reanalyze": "analyze_fault",
+            "analyze_fault": "analyze_fault",
+            "code_review":   "code_review",
+            "plan":          "plan",
+            "generate":      "generate",
+            "verify":        "verify",
+            "reflect":       "reflect",
+            "done":          END,
         },
     )
+
+    # All worker nodes return to the orchestrate hub after completion
+    for _node in ("analyze_fault", "code_review", "plan", "generate", "verify", "reflect"):
+        g.add_edge(_node, "orchestrate")
 
     return g.compile()
 
@@ -1017,6 +1170,7 @@ def run_file_review(
         "reflections": [],
         "patches_tried": [],
         "failure_reasons": [],
+        "completed_steps": [],
         "events": [("phase", {"phase": 2, "file": file_path, "status": "running"})],
         # mutable
         "fault_desc": "",
@@ -1032,6 +1186,7 @@ def run_file_review(
         "attempt": 0,
         "total_steps": 0,
         "reanalyze_count": 0,
+        "next_action": "",
         "orchestrator_decision": "",
     }
 

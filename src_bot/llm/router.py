@@ -250,8 +250,9 @@ def get_llm(
         return _with_rate_limit_retry(llm)
     elif provider == "vllm":
         primary = _create_vllm(model or VLLM_DEFAULT_MODEL, temperature, vllm_base)
-        # When using vLLM with a role, auto-fallback to Groq on connection errors
-        if role:
+        # Optional Groq fallback for vLLM connection errors. Keep this disabled
+        # when deployments must avoid ChatGroq entirely.
+        if role and configs.VLLM_FALLBACK_TO_GROQ:
             fallback_model = model or GROQ_DEFAULT_MODEL
             def _groq_fallback():
                 return _with_rate_limit_retry(_create_groq(fallback_model, temperature))

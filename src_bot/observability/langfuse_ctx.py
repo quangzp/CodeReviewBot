@@ -191,7 +191,7 @@ def langfuse_trace(
 
 
 @contextmanager
-def langfuse_span(name: str, *, metadata: Optional[dict] = None):
+def langfuse_span(name: str, *, metadata: Optional[dict] = None, input: Optional[Any] = None):
     """Create a child Langfuse span around a pipeline phase (v3 API).
 
     No-op when LANGFUSE_ENABLED=false or langfuse is not installed.
@@ -206,7 +206,7 @@ def langfuse_span(name: str, *, metadata: Optional[dict] = None):
         if configs.LANGFUSE_ENABLED:
             client = _get_langfuse_client()
             if client:
-                span_cm = client.start_as_current_span(name=name)
+                span_cm = client.start_as_current_span(name=name, input=input)
                 span_cm.__enter__()
                 entered = True
                 span_depth_token = _active_span_depth.set(_active_span_depth.get() + 1)

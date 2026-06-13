@@ -77,6 +77,7 @@ class Configs(BaseSettings):
     VLLM_CHAT_BASE: str = os.getenv("VLLM_CHAT_BASE", "")
     VLLM_GEN_BASE: str = os.getenv("VLLM_GEN_BASE", "")
     VLLM_REASON_BASE: str = os.getenv("VLLM_REASON_BASE", "")  # empty = shares VLLM_GEN_BASE
+    VLLM_FALLBACK_TO_GROQ: bool = os.getenv("VLLM_FALLBACK_TO_GROQ", "true").lower() == "true"
 
     # Langfuse observability (opt-in — disabled by default)
     LANGFUSE_ENABLED: bool = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"

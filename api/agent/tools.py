@@ -218,6 +218,25 @@ TOOL_DESCRIPTIONS = [
             "required": ["pr_url"],
         },
     },
+    {
+        "name": "get_review_detail",
+        "description": (
+            "Show the full results of a completed PR review: fault descriptions, generated patches, "
+            "evaluation scores, and review comments for each file. "
+            "Use this when the user asks to 'show the results', 'what did you find', 'show the patches', "
+            "'is it done — show me', or wants to see the actual content of a review."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "pr_url": {
+                    "type": "string",
+                    "description": "Full GitHub PR URL of the review to show, e.g. https://github.com/owner/repo/pull/4",
+                },
+            },
+            "required": ["pr_url"],
+        },
+    },
 ]
 
 
@@ -719,6 +738,76 @@ async def tool_recent_reviews(repo_name: str = "", limit: int = 10, **kwargs) ->
     }
 
 
+async def tool_get_review_detail(pr_url: str, **kwargs) -> dict:
+    """Show the full results of a completed PR review (patches, faults, scores)."""
+    try:
+        repo_name, pr_number = parse_pr_url(pr_url)
+    except ValueError as e:
+        return {"summary": f"Invalid PR URL: {e}", "render": {"kind": "error", "message": str(e)}}
+
+    reviews = await list_reviews()
+    matching = [r for r in reviews if r.pr_url == pr_url]
+    if not matching:
+        matching = [r for r in reviews if r.pr_number == pr_number and r.repo_name == repo_name]
+
+    if not matching:
+        return {
+            "summary": f"No review found for {repo_name}#{pr_number}. Run `review_pr` first.",
+            "render": {"kind": "error", "message": f"No review found for PR #{pr_number}."},
+        }
+
+    review = sorted(matching, key=lambda r: r.created_at, reverse=True)[0]
+
+    if review.status not in ("completed", "failed"):
+        return {
+            "summary": f"Review #{pr_number} is still {review.status}. Check back once it completes.",
+            "render": {
+                "kind": "review",
+                "review_id": review.id,
+                "pr_url": pr_url,
+                "repo_name": repo_name,
+                "pr_number": pr_number,
+            },
+        }
+
+    files = []
+    for fr in review.file_reviews:
+        files.append({
+            "file_path": fr.file_path,
+            "fault_description": fr.phase2_fault,
+            "patch": fr.patch,
+            "applies_cleanly": fr.applies_cleanly,
+            "eval_score": fr.eval_score,
+            "eval_reason": fr.eval_reason,
+            "risk_level": fr.risk_level,
+            "attempts": fr.reflexion_attempts,
+            "review_comments": fr.review_comments or [],
+        })
+
+    patches_count = sum(1 for f in files if f["patch"])
+    summary_parts = [
+        f"Review of {repo_name}#{pr_number} — {review.status}.",
+        f"{patches_count}/{len(files)} file(s) have patches.",
+    ]
+    if patches_count:
+        patch_files = [f["file_path"] for f in files if f["patch"]]
+        summary_parts.append("Patched: " + ", ".join(patch_files[:3]))
+
+    return {
+        "summary": " ".join(summary_parts),
+        "render": {
+            "kind": "review_detail",
+            "review_id": review.id,
+            "pr_url": pr_url,
+            "pr_number": pr_number,
+            "repo_name": repo_name,
+            "status": review.status,
+            "total_patches": patches_count,
+            "files": files,
+        },
+    }
+
+
 async def tool_apply_review_fixes(pr_url: str, **kwargs) -> dict:
     """Apply patches from the latest completed review of a PR as a fix-branch PR on GitHub."""
     import os
@@ -843,4 +932,5 @@ def build_tool_registry() -> dict[str, Callable[..., Awaitable[dict]]]:
         "explore_project": tool_explore_project,
         "recent_reviews": tool_recent_reviews,
         "apply_review_fixes": tool_apply_review_fixes,
+        "get_review_detail": tool_get_review_detail,
     }

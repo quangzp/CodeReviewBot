@@ -3,6 +3,7 @@ import ProjectCard from './ProjectCard'
 import ProjectListCard from './ProjectListCard'
 import ReviewCard from './ReviewCard'
 import ReviewListCard from './ReviewListCard'
+import ReviewDetailCard from './ReviewDetailCard'
 import FixAttemptCard from './FixAttemptCard'
 
 interface ToolResultProps {
@@ -151,6 +152,19 @@ export default function ToolResult({ summary, render }: ToolResultProps) {
           repoName={render.repo_name}
           lastError={render.last_error}
           bugDescription={render.bug_description}
+        />
+      )
+      break
+    case 'review_detail':
+      body = (
+        <ReviewDetailCard
+          reviewId={render.review_id}
+          prUrl={render.pr_url}
+          prNumber={render.pr_number}
+          repoName={render.repo_name}
+          status={render.status}
+          totalPatches={render.total_patches}
+          files={render.files}
         />
       )
       break

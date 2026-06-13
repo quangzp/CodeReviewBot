@@ -573,9 +573,11 @@ async def run_pr_review(
                     session, actual_file, project_id, top_k=_top_k
                 )
 
-                # ── LangGraph Harness: analyze_fault → plan → generate → verify
-                #    → reflect (retry) → orchestrate (dynamic routing by reason LLM) ──
-                with langfuse_span("harness_file_review", metadata={"file": actual_file, "risk": file_result.risk_level}):
+                # ── LangGraph Harness: GPT-4o orchestrator hub → dynamic routing ──
+                with langfuse_span(
+                    "orchestrator:gpt-4o",
+                    input={"file": actual_file, "risk": file_result.risk_level},
+                ):
                     _lf_ctx = contextvars.copy_context()
                     harness_result = await loop.run_in_executor(
                         None,
