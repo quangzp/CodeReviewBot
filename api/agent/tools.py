@@ -154,6 +154,31 @@ TOOL_DESCRIPTIONS = [
         },
     },
     {
+        "name": "explore_project",
+        "description": (
+            "Explain an onboarded project's structure, frameworks, libraries, entrypoints, "
+            "architecture, or code/request flow. Use this when the user wants to understand "
+            "how a specific repo is organized or how it works."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "repo_name": {
+                    "type": "string",
+                    "description": "Repo in 'owner/name' form. The project must be already indexed.",
+                },
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "The user's project-understanding question, e.g. 'explain the structure', "
+                        "'which frameworks are used?', or 'how does the request flow work?'"
+                    ),
+                },
+            },
+            "required": ["repo_name", "question"],
+        },
+    },
+    {
         "name": "recent_reviews",
         "description": (
             "List recent reviews, optionally filtered by project. "
@@ -439,6 +464,231 @@ async def tool_refactor_code(
     return result
 
 
+def _read_repo_file(repo_dir, rel_path: str, max_chars: int = 4000) -> str:
+    """Read a small text file from a repo clone for project exploration."""
+    try:
+        path = repo_dir / rel_path
+        if not path.exists() or not path.is_file():
+            return ""
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if len(text) > max_chars:
+            return text[:max_chars] + "\n... (truncated)"
+        return text
+    except Exception:
+        return ""
+
+
+def _repo_tree(repo_dir, max_depth: int = 2, max_entries: int = 120) -> str:
+    """Return a compact directory tree, skipping generated/vendor folders."""
+    excluded = {
+        ".git", ".venv", "venv", "env", "node_modules", "__pycache__",
+        ".pytest_cache", ".mypy_cache", ".ruff_cache", "dist", "build",
+        "data", ".next", "coverage",
+    }
+    lines: list[str] = []
+
+    def walk(path, prefix: str, depth: int):
+        if len(lines) >= max_entries or depth > max_depth:
+            return
+        try:
+            children = sorted(
+                [p for p in path.iterdir() if p.name not in excluded and not p.name.startswith(".")],
+                key=lambda p: (not p.is_dir(), p.name.lower()),
+            )
+        except Exception:
+            return
+        for child in children:
+            if len(lines) >= max_entries:
+                break
+            suffix = "/" if child.is_dir() else ""
+            lines.append(f"{prefix}{child.name}{suffix}")
+            if child.is_dir():
+                walk(child, prefix + "  ", depth + 1)
+
+    walk(repo_dir, "", 1)
+    if len(lines) >= max_entries:
+        lines.append("... (truncated)")
+    return "\n".join(lines)
+
+
+def _detect_entrypoints(repo_dir) -> list[str]:
+    candidates = [
+        "api/main.py", "main.py", "app.py", "manage.py", "server.py",
+        "src/main.py", "src/app.py", "frontend/src/main.tsx",
+        "frontend/src/main.ts", "frontend/src/App.tsx",
+        "package.json", "frontend/package.json", "docker-compose.yml",
+        "Dockerfile", "pyproject.toml",
+    ]
+    return [p for p in candidates if (repo_dir / p).exists()]
+
+
+def _dependency_context(repo_dir) -> str:
+    parts: list[str] = []
+    for rel in [
+        "requirements.txt",
+        "requirement.txt",
+        "requirements-dev.txt",
+        "pyproject.toml",
+        "package.json",
+        "frontend/package.json",
+        "docker-compose.yml",
+        "Dockerfile",
+    ]:
+        text = _read_repo_file(repo_dir, rel, max_chars=2500)
+        if text:
+            parts.append(f"## {rel}\n{text}")
+    return "\n\n".join(parts)
+
+
+def _graph_overview(project_id: str) -> str:
+    """Summarize indexed Neo4j graph shape. Fail closed if Neo4j is unavailable."""
+    try:
+        from neo4j import GraphDatabase
+        from src_bot.config.config import configs
+
+        driver = GraphDatabase.driver(
+            configs.APP_NEO4J_URL,
+            auth=(configs.APP_NEO4J_USER, configs.APP_NEO4J_PASSWORD),
+        )
+        try:
+            with driver.session() as session:
+                modules = session.run(
+                    """
+                    MATCH (m:Module {project_id: $pid})
+                    OPTIONAL MATCH (m)-[:DEFINES]->(n:CodeNode {project_id: $pid})
+                    RETURN m.file_path AS file, count(n) AS definitions
+                    ORDER BY definitions DESC, file ASC
+                    LIMIT 12
+                    """,
+                    pid=project_id,
+                ).data()
+                callers = session.run(
+                    """
+                    MATCH (n:CodeNode {project_id: $pid})
+                    OPTIONAL MATCH (n)-[:CALLS]->(c:CodeNode {project_id: $pid})
+                    WITH n, count(c) AS outgoing
+                    WHERE outgoing > 0
+                    RETURN n.file_path AS file, n.qualified_name AS name, outgoing
+                    ORDER BY outgoing DESC
+                    LIMIT 10
+                    """,
+                    pid=project_id,
+                ).data()
+        finally:
+            driver.close()
+
+        lines = ["Top files by indexed definitions:"]
+        lines.extend(f"- {r['file']}: {r['definitions']}" for r in modules)
+        lines.append("\nTop call-heavy functions/classes:")
+        lines.extend(
+            f"- {r['name']} ({r['file']}): calls {r['outgoing']} node(s)"
+            for r in callers
+        )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Graph overview unavailable: {type(e).__name__}: {str(e)[:120]}"
+
+
+async def tool_explore_project(repo_name: str, question: str, **kwargs) -> dict:
+    """Explain structure/frameworks/flow of an indexed project."""
+    project = await get_project_by_repo_name(repo_name)
+    if not project:
+        return {
+            "summary": f"Project '{repo_name}' is not onboarded.",
+            "render": {
+                "kind": "error",
+                "message": f"'{repo_name}' is not onboarded yet.",
+                "suggestion": f"Add https://github.com/{repo_name} first, then ask again.",
+            },
+        }
+    if project.status != "indexed":
+        return {
+            "summary": f"Project '{repo_name}' is not ready (status: {project.status}).",
+            "render": {
+                "kind": "error",
+                "message": f"Project status is {project.status}. Wait for indexing to finish.",
+            },
+        }
+
+    from api.project_indexer import get_project_dir
+    from langchain_core.messages import HumanMessage
+    from src_bot.llm.router import get_llm
+
+    repo_dir = get_project_dir(project.id)
+    if not repo_dir.exists():
+        return {
+            "summary": f"Workspace for '{repo_name}' is missing.",
+            "render": {
+                "kind": "error",
+                "message": f"Workspace for '{repo_name}' is missing after server restart.",
+                "suggestion": f"Reindex {repo_name} first, then ask again.",
+            },
+        }
+
+    summary_text = _read_repo_file(repo_dir, "PROJECT_SUMMARY.txt", max_chars=1500)
+    readme = ""
+    for candidate in ("README.md", "README.rst", "README.txt"):
+        readme = _read_repo_file(repo_dir, candidate, max_chars=4500)
+        if readme:
+            readme = f"## {candidate}\n{readme}"
+            break
+
+    entrypoints = _detect_entrypoints(repo_dir)
+    tree = _repo_tree(repo_dir)
+    dependencies = _dependency_context(repo_dir)
+    graph = _graph_overview(project.id)
+
+    context = (
+        f"Repository: {project.repo_name}\n"
+        f"Status: {project.status}\n"
+        f"Indexed files: {project.file_count}\n"
+        f"Graph nodes: {project.node_count}, edges: {project.edge_count}\n"
+        f"Last commit: {project.last_commit_sha or 'unknown'}\n\n"
+        f"PROJECT_SUMMARY:\n{summary_text or '(none)'}\n\n"
+        f"DIRECTORY TREE:\n{tree or '(empty)'}\n\n"
+        f"ENTRYPOINT CANDIDATES:\n" + "\n".join(f"- {p}" for p in entrypoints) + "\n\n"
+        f"DEPENDENCY / CONFIG FILES:\n{dependencies or '(none found)'}\n\n"
+        f"GRAPH OVERVIEW:\n{graph}\n\n"
+        f"README:\n{readme or '(none found)'}"
+    )
+
+    prompt = (
+        "You are a senior engineer helping a teammate understand an indexed repository.\n"
+        "Answer only from the repository context below. If something is not visible, say so.\n"
+        "Match the user's language. Prefer concise sections and cite file paths when useful.\n"
+        "Do not suggest code changes.\n\n"
+        f"User question: {question}\n\n"
+        f"Repository context:\n{context[:18000]}"
+    )
+
+    try:
+        loop = asyncio.get_event_loop()
+        llm = get_llm(role="chat", temperature=0)
+        response = await loop.run_in_executor(
+            None, lambda: llm.invoke([HumanMessage(content=prompt)])
+        )
+        answer = (response.content if hasattr(response, "content") else str(response)).strip()
+    except Exception as e:
+        answer = (
+            f"Could not synthesize a full answer because the LLM call failed: {e}\n\n"
+            f"Available context:\n- Entry points: {', '.join(entrypoints) or 'none detected'}\n"
+            f"- Indexed files: {project.file_count}\n- Graph nodes: {project.node_count}\n\n"
+            f"Directory tree:\n{tree[:2000]}"
+        )
+
+    return {
+        "summary": f"Explored {repo_name}: {question[:120]}",
+        "render": {
+            "kind": "project_exploration",
+            "repo_name": repo_name,
+            "question": question,
+            "answer": answer,
+            "entrypoints": entrypoints,
+            "tree": tree,
+        },
+    }
+
+
 async def tool_recent_reviews(repo_name: str = "", limit: int = 10, **kwargs) -> dict:
     """List recent reviews."""
     project_id = None
@@ -590,6 +840,7 @@ def build_tool_registry() -> dict[str, Callable[..., Awaitable[dict]]]:
         "review_pr": tool_review_pr,
         "fix_bug": tool_fix_bug,
         "refactor_code": tool_refactor_code,
+        "explore_project": tool_explore_project,
         "recent_reviews": tool_recent_reviews,
         "apply_review_fixes": tool_apply_review_fixes,
     }

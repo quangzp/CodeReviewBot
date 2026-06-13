@@ -38,6 +38,67 @@ function ErrorCard({ message, suggestion }: { message: string; suggestion?: stri
   )
 }
 
+function ProjectExplorationCard({
+  repoName,
+  question,
+  answer,
+  entrypoints,
+  tree,
+}: {
+  repoName: string
+  question: string
+  answer: string
+  entrypoints?: string[]
+  tree?: string
+}) {
+  return (
+    <div className="bg-white border border-gray-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="px-4 py-3 border-b border-gray-200 bg-gray-50">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base">ðŸ§­</span>
+          <div className="min-w-0">
+            <div className="text-sm font-semibold text-gray-900 truncate">{repoName}</div>
+            <div className="text-xs text-gray-500 truncate">{question}</div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 py-3 space-y-3">
+        <div className="text-sm text-gray-800 whitespace-pre-wrap leading-6">{answer}</div>
+
+        {entrypoints && entrypoints.length > 0 && (
+          <div>
+            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+              Entrypoints
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {entrypoints.map((path) => (
+                <code
+                  key={path}
+                  className="px-2 py-1 bg-gray-100 border border-gray-200 rounded text-xs text-gray-700"
+                >
+                  {path}
+                </code>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {tree && (
+          <details className="group">
+            <summary className="cursor-pointer text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Directory tree
+            </summary>
+            <pre className="mt-2 max-h-80 overflow-auto rounded-lg bg-gray-950 text-gray-100 text-xs p-3 leading-5">
+              {tree}
+            </pre>
+          </details>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function ToolResult({ summary, render }: ToolResultProps) {
   let body: JSX.Element | null = null
 
@@ -66,6 +127,17 @@ export default function ToolResult({ summary, render }: ToolResultProps) {
       break
     case 'review_list':
       body = <ReviewListCard reviews={render.reviews} />
+      break
+    case 'project_exploration':
+      body = (
+        <ProjectExplorationCard
+          repoName={render.repo_name}
+          question={render.question}
+          answer={render.answer}
+          entrypoints={render.entrypoints}
+          tree={render.tree}
+        />
+      )
       break
     case 'fix_attempt':
       body = (
