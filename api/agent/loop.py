@@ -30,15 +30,21 @@ from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 
 from src_bot.config.config import configs
 from src_bot.llm.router import get_llm
+from src_bot.observability.langfuse_ctx import (
+    langfuse_flush,
+    langfuse_span,
+    langfuse_trace,
+    langfuse_update_current_span,
+)
 from api.agent.tools import build_tool_registry, TOOL_DESCRIPTIONS
 
-READ_ONLY_TOOLS = {"list_projects", "project_status", "recent_reviews"}
+READ_ONLY_TOOLS = {"list_projects", "project_status", "recent_reviews", "explore_project"}
 
 
 # ============================================================================
 # System prompt
 # ============================================================================
-SYSTEM_PROMPT = """You are CodeReviewBot — a focused assistant with ONE job: help engineers manage projects, review pull requests, fix bugs, and refactor code in GitHub repositories.
+SYSTEM_PROMPT = """You are CodeReviewBot — a focused assistant with ONE job: help engineers understand and manage projects, review pull requests, fix bugs, and refactor code in GitHub repositories.
 
 You have access to these tools:
 
@@ -51,20 +57,24 @@ You have access to these tools:
 3. **Apply review patches** — push verified patches from a completed review as a fix-branch PR
 4. **Fix a bug** — locate and patch a bug described in natural language
 5. **Refactor code** — improve code structure/readability without changing behavior
-6. **Check review / project status** — report progress on ongoing tasks
+6. **Explore a project** — explain an indexed repo's structure, libraries, frameworks,
+   entrypoints, architecture, and code/request flow using repo context
+7. **Check review / project status** — report progress on ongoing tasks
 
-That is ALL. You do not answer general programming questions, explain concepts, write code
-for the user, discuss architecture, or engage in any conversation outside the above scope.
+That is ALL. You may explain architecture only for a specific onboarded project. You do not
+answer general programming questions, explain concepts detached from a repo, write code for
+the user, or engage in any conversation outside the above scope.
 
 # Strict scope — what you DO NOT do
 
 - Do NOT answer questions like "What is GraphRAG?", "How does Python work?", "What is a bug?"
+- Do NOT explain generic frameworks/concepts unless the user asks how a specific indexed repo uses them
 - Do NOT write code, explain algorithms, or give advice unrelated to managing projects/reviews
 - Do NOT engage in small talk, greetings beyond a single line, or off-topic chat
 - Do NOT speculate about reviews that haven't run yet
 
 When a user asks something outside scope, respond with EXACTLY this and nothing more:
-"I'm only able to help with adding projects, reviewing pull requests, fixing bugs, and refactoring code. What would you like to do?"
+"I'm only able to help with adding projects, reviewing pull requests, fixing bugs, refactoring code, and exploring indexed projects. What would you like to do?"
 
 # How to call tools
 
@@ -112,6 +122,12 @@ You: <tool_call>{{"name": "fix_bug", "args": {{"repo_name": "jertel/elastalert2"
 
 User: "Refactor the URL builder in nicholasgibson2/elastalert-jertel to reduce duplication"
 You: <tool_call>{{"name": "refactor_code", "args": {{"repo_name": "nicholasgibson2/elastalert-jertel", "refactor_description": "Reduce duplication in the URL builder functions"}}}}</tool_call>
+
+User: "Giải thích cấu trúc project nicholasgibson2/elastalert-jertel"
+You: <tool_call>{{"name": "explore_project", "args": {{"repo_name": "nicholasgibson2/elastalert-jertel", "question": "Giải thích cấu trúc project"}}}}</tool_call>
+
+User: "Project jertel/elastalert2 dùng framework và thư viện gì?"
+You: <tool_call>{{"name": "explore_project", "args": {{"repo_name": "jertel/elastalert2", "question": "Project dùng framework và thư viện gì?"}}}}</tool_call>
 
 User: "Fix the bug" (ambiguous)
 You: Which project and what bug? Please share the repo name and a short description.
@@ -161,6 +177,15 @@ def _parse_tool_call(text: str) -> Optional[dict]:
         return None
 
 
+def _compact_tool_args(args: dict) -> dict:
+    """Trim tool args before sending them to observability metadata."""
+    compact: dict = {}
+    for key, value in (args or {}).items():
+        text = str(value)
+        compact[key] = text[:300] + ("..." if len(text) > 300 else "")
+    return compact
+
+
 # ============================================================================
 # Agent turn — runs one user → assistant exchange
 # ============================================================================
@@ -186,16 +211,25 @@ async def run_agent_turn(
         {"type": "done"}
         {"type": "error", "message": ...}
     """
+    _lf_trace_cm = None
     try:
-        # Set Langfuse trace context for this agent turn
+        # Open a root Langfuse trace for this chat turn. The helper is a no-op
+        # when Langfuse is disabled, so the control flow stays identical.
         try:
             import uuid
-            from src_bot.observability.langfuse_ctx import set_trace_context, LangfuseTraceContext
-            set_trace_context(LangfuseTraceContext(
-                trace_id=f"chat-{uuid.uuid4().hex[:12]}",
+
+            _trace_id = f"chat-{uuid.uuid4().hex[:12]}"
+            _lf_trace_cm = langfuse_trace(
+                trace_id=_trace_id,
+                session_id=user_login or None,
+                user_id=user_login or "unknown",
                 tags=["agent_chat"],
-                metadata={"message_preview": user_message[:80]},
-            ))
+                metadata={
+                    "message_preview": user_message[:120],
+                    "history_turns": len(history or []),
+                },
+            )
+            _lf_trace_cm.__enter__()
         except Exception as e:
             logger.debug("Langfuse trace setup skipped: %s", e)
 
@@ -208,17 +242,29 @@ async def run_agent_turn(
         loop = asyncio.get_event_loop()
 
         yield {"type": "thinking", "step": 0}
-        intent, missing = await loop.run_in_executor(
-            None, lambda: classify(user_message, history=history)
-        )
+        with langfuse_span(
+            "chat.classify_intent",
+            metadata={
+                "message_preview": user_message[:120],
+                "history_turns": len(history or []),
+            },
+        ):
+            intent, missing = await loop.run_in_executor(
+                None, lambda: classify(user_message, history=history)
+            )
+            langfuse_update_current_span(
+                metadata={"intent": str(intent), "missing": missing[:200] if missing else ""}
+            )
 
         if intent == Intent.OUT_SCOPE:
+            langfuse_update_current_span(output={"reply": OUT_SCOPE_REPLY})
             yield {"type": "message", "text": OUT_SCOPE_REPLY}
             yield {"type": "done"}
             return
 
         if intent == Intent.CLARIFY:
             clarify_msg = f"I need a bit more info to help with that. {missing}."
+            langfuse_update_current_span(output={"reply": clarify_msg})
             yield {"type": "message", "text": clarify_msg}
             yield {"type": "done"}
             return
@@ -240,15 +286,31 @@ async def run_agent_turn(
 
             # Format the chat for the LLM
             messages = _convo_to_messages(convo)
-            response = await loop.run_in_executor(None, lambda: llm.invoke(messages))
-            text = response.content if hasattr(response, "content") else str(response)
+            with langfuse_span(
+                "chat.agent_llm",
+                metadata={"step": step + 1, "messages": len(messages)},
+            ):
+                response = await loop.run_in_executor(None, lambda: llm.invoke(messages))
+                text = response.content if hasattr(response, "content") else str(response)
 
-            tool_call = _parse_tool_call(text)
+                tool_call = _parse_tool_call(text)
+                langfuse_update_current_span(
+                    metadata={
+                        "has_tool_call": bool(tool_call),
+                        "tool_name": (tool_call or {}).get("name", ""),
+                    },
+                    output={"response_preview": text[:500]},
+                )
 
             if not tool_call:
                 # No tool — this is the final answer
                 clean = _TOOL_CALL_RE.sub("", text).strip()
                 if clean:
+                    with langfuse_span(
+                        "chat.final_response",
+                        metadata={"reason": "no_tool", "step": step + 1},
+                    ):
+                        langfuse_update_current_span(output={"text": clean[:1000]})
                     yield {"type": "message", "text": clean}
                 yield {"type": "done"}
                 return
@@ -281,13 +343,25 @@ async def run_agent_turn(
                 }
                 continue
 
-            try:
-                result = await tools[tool_name](**tool_args, user_login=user_login)
-            except Exception as e:
-                result = {
-                    "summary": f"Tool failed: {type(e).__name__}: {e}",
-                    "render": {"kind": "error", "message": str(e)},
-                }
+            with langfuse_span(
+                "chat.tool_call",
+                metadata={"name": tool_name, "args": _compact_tool_args(tool_args)},
+            ):
+                try:
+                    result = await tools[tool_name](**tool_args, user_login=user_login)
+                except Exception as e:
+                    result = {
+                        "summary": f"Tool failed: {type(e).__name__}: {e}",
+                        "render": {"kind": "error", "message": str(e)},
+                    }
+                render = result.get("render") or {}
+                langfuse_update_current_span(
+                    metadata={
+                        "render_kind": render.get("kind", ""),
+                        "status": render.get("status", ""),
+                    },
+                    output={"summary": result.get("summary", "")[:1000]},
+                )
 
             yield {
                 "type": "tool_result",
@@ -308,10 +382,15 @@ async def run_agent_turn(
                         "Write one short sentence describing what was found. No tool calls."
                     ),
                 })
-                final = await loop.run_in_executor(
-                    None, lambda: llm.invoke(_convo_to_messages(convo))
-                )
-                final_text = final.content if hasattr(final, "content") else str(final)
+                with langfuse_span(
+                    "chat.final_response",
+                    metadata={"reason": "read_only_tool", "tool_name": tool_name},
+                ):
+                    final = await loop.run_in_executor(
+                        None, lambda: llm.invoke(_convo_to_messages(convo))
+                    )
+                    final_text = final.content if hasattr(final, "content") else str(final)
+                    langfuse_update_current_span(output={"text": final_text[:1000]})
                 clean = _TOOL_CALL_RE.sub("", final_text).strip()
                 if clean:
                     yield {"type": "message", "text": clean}
@@ -329,10 +408,15 @@ async def run_agent_turn(
                         "Write one short sentence confirming success to the user. No tool calls."
                     ),
                 })
-                final = await loop.run_in_executor(
-                    None, lambda: llm.invoke(_convo_to_messages(convo))
-                )
-                final_text = final.content if hasattr(final, "content") else str(final)
+                with langfuse_span(
+                    "chat.final_response",
+                    metadata={"reason": "success_tool", "tool_name": tool_name},
+                ):
+                    final = await loop.run_in_executor(
+                        None, lambda: llm.invoke(_convo_to_messages(convo))
+                    )
+                    final_text = final.content if hasattr(final, "content") else str(final)
+                    langfuse_update_current_span(output={"text": final_text[:1000]})
                 clean = _TOOL_CALL_RE.sub("", final_text).strip()
                 if clean:
                     yield {"type": "message", "text": clean}
@@ -368,6 +452,13 @@ async def run_agent_turn(
             "message": f"{type(e).__name__}: {e}",
             "traceback": traceback.format_exc()[-500:],
         }
+    finally:
+        if _lf_trace_cm is not None:
+            try:
+                _lf_trace_cm.__exit__(None, None, None)
+            except Exception:
+                pass
+        langfuse_flush()
 
 
 def _convo_to_messages(convo: list[dict]):

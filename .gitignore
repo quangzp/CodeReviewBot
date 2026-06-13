@@ -31,3 +31,4 @@ docs/claude-progress.md
 
 # SWE-bench prediction outputs (all variants)
 test_predictions*.jsonl
+KGCompass

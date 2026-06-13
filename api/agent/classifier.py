@@ -34,9 +34,11 @@ The bot has EXACTLY these capabilities:
 4. Refactor code in a project (user asks to improve, clean up, restructure, or refactor code)
 5. List projects, check project status, reindex a project
 6. Show recent reviews or check review status
+7. Explore an onboarded project: explain repository structure, frameworks, libraries,
+   entrypoints, architecture, data/request flow, or how modules fit together
 
 Classify the user message into ONE of:
-- IN_SCOPE   : clearly relates to one of the 6 capabilities above
+- IN_SCOPE   : clearly relates to one of the capabilities above
 - OUT_SCOPE  : general programming questions, explanations, small talk, anything else
 - CLARIFY    : relates to the capabilities but is missing required info AND cannot be inferred from context
 
@@ -57,14 +59,19 @@ Examples:
 "Refactor kibana_discover.py in elastalert-jertel"      -> IN_SCOPE
 "Clean up the auth module in my project"               -> IN_SCOPE
 "Improve code quality in nicholasgibson2/elastalert"   -> IN_SCOPE
+"Explain the structure of owner/repo"                  -> IN_SCOPE
+"Project owner/repo uses which frameworks?"            -> IN_SCOPE
+"Luồng request trong owner/repo chạy như thế nào?"     -> IN_SCOPE
+"Các thư viện chính của project này là gì?"            -> IN_SCOPE
 "What projects do I have?"                             -> IN_SCOPE
 "Reindex elastalert2"                                  -> IN_SCOPE
-"What is GraphRAG?"                                    -> OUT_SCOPE
+"What is GraphRAG?"                                    -> OUT_SCOPE unless asking how THIS repo uses it
 "How do I write a binary search?"                      -> OUT_SCOPE
 "Tell me a joke"                                       -> OUT_SCOPE
 "Fix the bug"  (no prior context)      -> CLARIFY (missing: repo name and bug description)
 "Review the PR" (no prior context)     -> CLARIFY (missing: PR URL or PR number and repo name)
 "Refactor the code" (no prior context) -> CLARIFY (missing: repo name and what to refactor)
+"Explain the architecture" (no prior context) -> CLARIFY (missing: repo name)
 "Is it done?" (after adding a project) -> IN_SCOPE  (subject clear from context)
 "How's it going?" (during indexing)    -> IN_SCOPE  (subject clear from context)
 "Done yet?" (after review started)     -> IN_SCOPE  (subject clear from context)
@@ -79,6 +86,7 @@ OUT_SCOPE_REPLY = (
     "- **Reviewing** a pull request\n"
     "- **Fixing** a bug in an indexed project\n"
     "- **Refactoring** code in an indexed project\n"
+    "- **Exploring** an indexed project's structure, libraries, frameworks, and flow\n"
     "- **Checking** project or review status\n\n"
     "What would you like to do?"
 )

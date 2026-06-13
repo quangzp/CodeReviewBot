@@ -19,6 +19,7 @@ class LangfuseTraceContext:
 _current_trace: ContextVar[Optional[LangfuseTraceContext]] = ContextVar(
     "langfuse_trace", default=None
 )
+_active_span_depth: ContextVar[int] = ContextVar("langfuse_active_span_depth", default=0)
 
 # Module-level singleton — one HTTP connection pool for the process lifetime
 _langfuse_client: Optional[Any] = None
@@ -62,6 +63,61 @@ def clear_trace_context() -> None:
     _current_trace.set(None)
 
 
+def has_active_langfuse_span() -> bool:
+    return _active_span_depth.get() > 0
+
+
+def langfuse_flush() -> None:
+    """Best-effort flush so short-lived request traces are sent promptly."""
+    try:
+        from src_bot.config.config import configs
+        if not configs.LANGFUSE_ENABLED:
+            return
+        client = _get_langfuse_client()
+        if client and hasattr(client, "flush"):
+            client.flush()
+    except Exception:
+        pass
+
+
+def langfuse_update_current_span(
+    *,
+    metadata: Optional[dict] = None,
+    output: Optional[Any] = None,
+    status_message: Optional[str] = None,
+) -> None:
+    """Best-effort update for the active Langfuse span.
+
+    Keeps instrumentation callers decoupled from the Langfuse SDK. All failures
+    are swallowed so observability never changes pipeline behavior.
+    """
+    try:
+        from src_bot.config.config import configs
+        if not configs.LANGFUSE_ENABLED:
+            return
+        if not has_active_langfuse_span():
+            return
+        client = _get_langfuse_client()
+        if not client:
+            return
+        kwargs: dict[str, Any] = {}
+        if metadata:
+            kwargs["metadata"] = metadata
+        if output is not None:
+            kwargs["output"] = output
+        if status_message:
+            kwargs["status_message"] = status_message
+        if kwargs:
+            try:
+                client.update_current_span(**kwargs)
+            except TypeError:
+                # Some SDK versions accept only a subset of these fields.
+                if metadata:
+                    client.update_current_span(metadata=metadata)
+    except Exception:
+        pass
+
+
 @contextmanager
 def langfuse_trace(
     trace_id: str,
@@ -93,16 +149,18 @@ def langfuse_trace(
     # Try to open a Langfuse root span; fall back to no-op if unavailable
     span_cm = None
     entered = False
+    span_depth_token = None
     try:
         from src_bot.config.config import configs
         if configs.LANGFUSE_ENABLED:
             client = _get_langfuse_client()
             if client:
                 span_cm = client.start_as_current_span(
-                    name=f"pipeline:{trace_id[:8]}", as_type="span"
+                    name=f"pipeline:{trace_id[:8]}"
                 )
                 span_cm.__enter__()
                 entered = True
+                span_depth_token = _active_span_depth.set(_active_span_depth.get() + 1)
                 try:
                     client.update_current_trace(
                         user_id=user_id,
@@ -123,6 +181,12 @@ def langfuse_trace(
                 span_cm.__exit__(None, None, None)
             except Exception:
                 pass
+        if span_depth_token is not None:
+            try:
+                _active_span_depth.reset(span_depth_token)
+            except Exception:
+                pass
+        langfuse_flush()
         _current_trace.reset(token)
 
 
@@ -136,19 +200,18 @@ def langfuse_span(name: str, *, metadata: Optional[dict] = None):
     """
     span_cm = None
     entered = False
+    span_depth_token = None
     try:
         from src_bot.config.config import configs
         if configs.LANGFUSE_ENABLED:
             client = _get_langfuse_client()
             if client:
-                span_cm = client.start_as_current_span(name=name, as_type="span")
+                span_cm = client.start_as_current_span(name=name)
                 span_cm.__enter__()
                 entered = True
+                span_depth_token = _active_span_depth.set(_active_span_depth.get() + 1)
                 if metadata:
-                    try:
-                        client.update_current_span(metadata=metadata)
-                    except Exception:
-                        pass
+                    langfuse_update_current_span(metadata=metadata)
     except Exception:
         pass
 
@@ -158,5 +221,10 @@ def langfuse_span(name: str, *, metadata: Optional[dict] = None):
         if entered and span_cm is not None:
             try:
                 span_cm.__exit__(None, None, None)
+            except Exception:
+                pass
+        if span_depth_token is not None:
+            try:
+                _active_span_depth.reset(span_depth_token)
             except Exception:
                 pass

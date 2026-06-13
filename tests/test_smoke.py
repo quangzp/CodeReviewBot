@@ -19,7 +19,7 @@ class TestImports:
     def test_import_agent_tools(self):
         from api.agent.tools import build_tool_registry, TOOL_DESCRIPTIONS
         assert callable(build_tool_registry)
-        assert len(TOOL_DESCRIPTIONS) == 7
+        assert len(TOOL_DESCRIPTIONS) == 9  # updated: explore_project + apply_review_fixes added
 
     def test_import_classifier(self):
         from api.agent.classifier import classify, Intent
@@ -99,7 +99,8 @@ class TestToolDescriptions:
         from api.agent.tools import TOOL_DESCRIPTIONS
         names = {t["name"] for t in TOOL_DESCRIPTIONS}
         expected = {"add_project", "list_projects", "project_status",
-                    "review_pr", "fix_bug", "refactor_code", "recent_reviews"}
+                    "review_pr", "fix_bug", "refactor_code", "recent_reviews",
+                    "explore_project", "apply_review_fixes"}
         assert expected == names
 
 

@@ -16,6 +16,7 @@ Flow:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import logging
 import re
 import sys
@@ -32,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src_bot.config.config import configs
 from src_bot.llm.router import get_llm
-from src_bot.observability.langfuse_ctx import langfuse_span
+from src_bot.observability.langfuse_ctx import langfuse_span, langfuse_update_current_span
 from api.models import ReviewRecord, FileReviewResult
 from api.database import update_review, get_project
 from api.project_indexer import get_project_dir
@@ -503,9 +504,20 @@ async def run_pr_review(
                 await emit("phase", {"phase": 1, "file": file_path, "status": "running"})
                 try:
                     with langfuse_span("phase1_file_localization", metadata={"file": file_path}):
+                        _lf_ctx = contextvars.copy_context()
                         found_file = await loop.run_in_executor(
-                            None, phase1_localize_file,
-                            llm, issue_text, repo_name, workdir, session, project_id,
+                            None,
+                            lambda: _lf_ctx.run(
+                                phase1_localize_file,
+                                llm, issue_text, repo_name, workdir, session, project_id,
+                            ),
+                        )
+                        langfuse_update_current_span(
+                            metadata={
+                                "file": file_path,
+                                "found_file": found_file,
+                                "status": "done",
+                            }
                         )
                 except Exception as _p1_err:
                     # LLM auth failure (401) or connectivity error — fall back to
@@ -564,10 +576,31 @@ async def run_pr_review(
                 # ── LangGraph Harness: analyze_fault → plan → generate → verify
                 #    → reflect (retry) → orchestrate (dynamic routing by reason LLM) ──
                 with langfuse_span("harness_file_review", metadata={"file": actual_file, "risk": file_result.risk_level}):
+                    _lf_ctx = contextvars.copy_context()
                     harness_result = await loop.run_in_executor(
-                        None, run_file_review,
-                        issue_text, actual_file, graph_context, workdir,
-                        project_id, file_result.risk_level, configs.REFLEXION_MAX_RETRIES,
+                        None,
+                        lambda: _lf_ctx.run(
+                            run_file_review,
+                            issue_text, actual_file, graph_context, workdir,
+                            project_id, file_result.risk_level, configs.REFLEXION_MAX_RETRIES,
+                        ),
+                    )
+                    langfuse_update_current_span(
+                        metadata={
+                            "file": actual_file,
+                            "risk": file_result.risk_level,
+                            "applies_cleanly": harness_result.applies_cleanly,
+                            "eval_score": harness_result.eval_score,
+                            "orchestrator_decision": harness_result.orchestrator_decision,
+                            "reflexion_attempts": harness_result.reflexion_attempts,
+                            "review_comments_count": len(harness_result.review_comments or []),
+                            "events_count": len(harness_result.events or []),
+                            "patch_size": len(harness_result.patch or ""),
+                        },
+                        output={
+                            "fault": harness_result.fault_desc[:300],
+                            "eval_reason": harness_result.eval_reason[:300],
+                        },
                     )
 
                 # Replay SSE events collected inside the harness
@@ -587,6 +620,35 @@ async def run_pr_review(
                 # ── End Harness ────────────────────────────────────────────────
 
                 file_reviews.append(file_result)
+
+        # ── Dependency fix synthesis (cross-file pattern detection) ──────────
+        # When multiple files share the same "No module named X" fault, the
+        # per-file harness can't fix it (you don't patch .py files for a missing
+        # pip package). This step detects that pattern and patches requirements.txt.
+        if workdir:
+            dep_fix = _synthesize_dependency_fix(file_reviews, workdir)
+            if dep_fix:
+                file_reviews.append(dep_fix)
+                if dep_fix.patch and dep_fix.applies_cleanly:
+                    patches_generated += 1
+                await emit("file_start", {
+                    "file": dep_fix.file_path,
+                    "index": len(changed_files),
+                    "total": len(changed_files) + 1,
+                })
+                await emit("phase", {
+                    "phase": 2, "file": dep_fix.file_path,
+                    "fault": dep_fix.phase2_fault[:120], "status": "done",
+                })
+                await emit("phase", {
+                    "phase": 3, "file": dep_fix.file_path,
+                    "attempt": 1, "status": "generated",
+                    "patch_size": len(dep_fix.patch),
+                })
+                logger.info(
+                    "[reviewer] Synthesized dependency fix for %s: %s",
+                    dep_fix.file_path, dep_fix.phase2_fault[:80],
+                )
 
         # ── Harness: Friction Summary SSE (repo-harness TRACE_SPEC) ──────────
         _scores = [fr.eval_score for fr in file_reviews if fr.eval_score is not None]
@@ -655,17 +717,35 @@ async def run_pr_review(
                 )
 
                 with langfuse_span("meta_review", metadata={"files": len(file_reviews)}):
+                    _lf_ctx = contextvars.copy_context()
                     _meta_raw = await loop.run_in_executor(
-                        None, lambda: _meta_llm.invoke([_HM(content=_meta_prompt)])
+                        None,
+                        lambda: _lf_ctx.run(
+                            _meta_llm.invoke,
+                            [_HM(content=_meta_prompt)],
+                        ),
                     )
-                _meta_text = (_meta_raw.content or "").strip()
-                # Strip DeepSeek thinking block if present
-                _meta_text = _re.sub(r'<think>.*?</think>', '', _meta_text, flags=_re.DOTALL).strip()
-                _meta_match = _re.search(r'\{.*\}', _meta_text, _re.DOTALL)
-                if _meta_match:
-                    meta_review = json.loads(_meta_match.group())
-                    record.meta_review = meta_review
-                    await emit("meta_review", meta_review)
+                    _meta_text = (_meta_raw.content or "").strip()
+                    # Strip DeepSeek thinking block if present
+                    _meta_text = _re.sub(r'<think>.*?</think>', '', _meta_text, flags=_re.DOTALL).strip()
+                    _meta_match = _re.search(r'\{.*\}', _meta_text, _re.DOTALL)
+                    if _meta_match:
+                        meta_review = json.loads(_meta_match.group())
+                        record.meta_review = meta_review
+                        langfuse_update_current_span(
+                            metadata={
+                                "status": "parsed",
+                                "overall_score": meta_review.get("overall_score"),
+                                "priority_issues_count": len(meta_review.get("priority_issues") or []),
+                                "refactoring_opportunities_count": len(
+                                    meta_review.get("refactoring_opportunities") or []
+                                ),
+                            },
+                            output={
+                                "summary": str(meta_review.get("summary", ""))[:500],
+                            },
+                        )
+                        await emit("meta_review", meta_review)
             except Exception as _mr_err:
                 logger.warning("[meta_review] Failed (non-fatal): %s", _mr_err)
 

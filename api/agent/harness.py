@@ -36,6 +36,7 @@ import contextvars
 import logging
 import operator
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Annotated, Any, Optional, TypedDict
 
@@ -69,6 +70,108 @@ def _compact_for_prompt(items: list, max_n: int, max_chars: int, label: str = ""
     if len(items) > max_n:
         result = f"  ... (showing last {max_n} of {len(items)}) ...\n" + result
     return result or "  (none)"
+
+
+def _safe_len(value: Any) -> int:
+    try:
+        return len(value)  # type: ignore[arg-type]
+    except Exception:
+        return 0
+
+
+def _node_start_metadata(state: dict) -> dict:
+    """Small, non-sensitive metadata shared by all harness node spans."""
+    return {
+        "file": state.get("file_path"),
+        "risk": state.get("risk_level"),
+        "attempt": state.get("attempt", 0),
+        "max_retries": state.get("max_retries"),
+        "total_steps": state.get("total_steps", 0),
+        "reanalyze_count": state.get("reanalyze_count", 0),
+        "has_graph_context": bool(state.get("graph_context")),
+        "reflections_count": _safe_len(state.get("reflections", [])),
+        "patches_tried_count": _safe_len(state.get("patches_tried", [])),
+        "failure_reasons_count": _safe_len(state.get("failure_reasons", [])),
+    }
+
+
+def _node_result_metadata(result: Any) -> dict:
+    """Summarise a node return value without sending full source or patches."""
+    if not isinstance(result, dict):
+        return {"result_type": type(result).__name__}
+
+    metadata: dict[str, Any] = {}
+    for key in (
+        "applies_cleanly",
+        "verification_passed",
+        "verification_reason",
+        "eval_score",
+        "orchestrator_decision",
+        "attempt",
+        "total_steps",
+    ):
+        if key in result:
+            value = result[key]
+            if isinstance(value, str):
+                value = value[:300]
+            metadata[key] = value
+
+    if "fault_desc" in result:
+        metadata["fault_desc_preview"] = str(result["fault_desc"])[:300]
+    if "patch" in result:
+        metadata["patch_size"] = len(result.get("patch") or "")
+    if "plan_contract" in result:
+        contract = result.get("plan_contract") or {}
+        metadata["contract_acceptance_criteria_count"] = _safe_len(
+            contract.get("acceptance_criteria", [])
+        ) if isinstance(contract, dict) else 0
+    if "review_comments" in result:
+        metadata["review_comments_count"] = _safe_len(result.get("review_comments", []))
+    if "failure_reasons" in result:
+        reasons = result.get("failure_reasons") or []
+        metadata["failure_reasons_added"] = _safe_len(reasons)
+        if reasons:
+            metadata["last_failure_reason"] = str(reasons[-1])[:300]
+    if "events" in result:
+        events = result.get("events") or []
+        metadata["events_added"] = _safe_len(events)
+        if events:
+            metadata["event_types"] = [str(ev[0]) for ev in events[:5] if ev]
+    return metadata
+
+
+def _instrument_node(name: str):
+    """Wrap a LangGraph node in a Langfuse span without changing behavior."""
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(state: HarnessState) -> dict:
+            from src_bot.observability.langfuse_ctx import (
+                langfuse_span,
+                langfuse_update_current_span,
+            )
+
+            with langfuse_span(f"harness.{name}", metadata=_node_start_metadata(state)):
+                try:
+                    result = fn(state)
+                    langfuse_update_current_span(
+                        metadata=_node_result_metadata(result),
+                        output={
+                            "node": name,
+                            "status": "done",
+                            "events": _safe_len(result.get("events", [])) if isinstance(result, dict) else 0,
+                        },
+                    )
+                    return result
+                except Exception as e:
+                    langfuse_update_current_span(
+                        metadata={"error_type": type(e).__name__, "error": str(e)[:500]},
+                        status_message=str(e)[:500],
+                    )
+                    raise
+
+        return wrapper
+
+    return decorator
 
 
 def _is_fatal_llm_error(exc: Exception) -> bool:
@@ -222,6 +325,7 @@ class HarnessState(TypedDict):
 # Node: analyze_fault  (reason LLM)
 # ---------------------------------------------------------------------------
 
+@_instrument_node("analyze_fault")
 def analyze_fault_node(state: HarnessState) -> dict:
     """Reason LLM — WHY is this file faulty and WHERE exactly?
 
@@ -312,6 +416,7 @@ def analyze_fault_node(state: HarnessState) -> dict:
 # Node: code_review  (fast_gate LLM — structured review comments)
 # ---------------------------------------------------------------------------
 
+@_instrument_node("code_review")
 def code_review_node(state: HarnessState) -> dict:
     """Fast-gate LLM — generate structured code review comments for the file.
 
@@ -381,6 +486,7 @@ def code_review_node(state: HarnessState) -> dict:
 # Node: plan  (reason LLM)
 # ---------------------------------------------------------------------------
 
+@_instrument_node("plan")
 def plan_node(state: HarnessState) -> dict:
     """Reason LLM — build structured PlannerContract (acceptance criteria + approach).
 
@@ -429,6 +535,7 @@ def plan_node(state: HarnessState) -> dict:
 # Node: generate  (generation LLM)
 # ---------------------------------------------------------------------------
 
+@_instrument_node("generate")
 def generate_node(state: HarnessState) -> dict:
     """Generation LLM — write the unified diff patch.
 
@@ -498,6 +605,7 @@ def generate_node(state: HarnessState) -> dict:
 # Node: verify  (AST → test → LLM evaluator, independent of generator)
 # ---------------------------------------------------------------------------
 
+@_instrument_node("verify")
 def verify_node(state: HarnessState) -> dict:
     """Multi-gate verification pipeline.
 
@@ -625,6 +733,7 @@ def verify_node(state: HarnessState) -> dict:
 # Node: reflect  (reason LLM)
 # ---------------------------------------------------------------------------
 
+@_instrument_node("reflect")
 def reflect_node(state: HarnessState) -> dict:
     """Reason LLM — self-critique of the failed patch.
 
@@ -668,6 +777,7 @@ def reflect_node(state: HarnessState) -> dict:
 # Node: orchestrate  ← HARNESS CORE (reason LLM makes process decision)
 # ---------------------------------------------------------------------------
 
+@_instrument_node("orchestrate")
 def orchestrate_node(state: HarnessState) -> dict:
     """
     Reason LLM makes a process decision after exhausting the retry budget.

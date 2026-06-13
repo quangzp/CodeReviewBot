@@ -160,6 +160,14 @@ export type ToolRender =
   | { kind: 'review'; review_id: string; pr_url: string; repo_name: string; pr_number: number }
   | { kind: 'review_list'; reviews: ReviewSummary[] }
   | {
+      kind: 'project_exploration'
+      repo_name: string
+      question: string
+      answer: string
+      entrypoints?: string[]
+      tree?: string
+    }
+  | {
       kind: 'fix_attempt'
       status: 'success' | 'no_file' | 'no_content' | 'patch_failed'
       file_path?: string
@@ -171,6 +179,8 @@ export type ToolRender =
       last_error?: string
       bug_description?: string
     }
+  | { kind: 'auto_onboard'; project?: ProjectRecord; message: string }
+  | { kind: 'fix_pr'; fix_pr_url: string; patches_applied: number; files: string[] }
   | { kind: 'error'; message: string; suggestion?: string }
 
 export type AgentEvent =
