@@ -90,6 +90,9 @@ File: {file_path}
 Fault description: {fault_description}
 Graph context (callers / callees): {graph_context}
 
+If the issue contains a [PR diff scope] section, the plan MUST stay inside that
+scope. Do not plan fixes for unrelated pre-existing bugs elsewhere in the file.
+
 Reply with ONLY valid JSON — no markdown fences, no explanation:
 {{
   "root_cause": "What is fundamentally wrong (1 sentence)",

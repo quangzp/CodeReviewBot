@@ -53,16 +53,18 @@ def parse_pr_url(pr_url: str) -> tuple[str, int]:
 
 def _checkout_pr_base(
     project_id: str,
-    base_sha: str,
+    target_sha: str,
     review_id: str,
     base_ref: str = "",
+    fetch_url: str | None = None,
 ) -> Path:
     """
     Create a per-PR working directory by copying the project's clone and
-    checking out the PR's base commit there. Doesn't disturb the project's
+    checking out the requested PR commit there. Doesn't disturb the project's
     main clone (which stays on HEAD of default branch).
 
-    base_ref: branch name on the base repo (e.g. "main"). Used to fetch
+    base_ref: branch name to fetch if the target SHA is not in the local clone.
+    fetch_url: optional remote URL for fork PR heads.
     the commit from GitHub when the local shallow clone doesn't have it.
 
     Returns the path to the per-PR working directory.
@@ -97,23 +99,24 @@ def _checkout_pr_base(
 
     # Try fast path: base_sha already available in shared object store
     result = subprocess.run(
-        ["git", "checkout", base_sha],
+        ["git", "checkout", target_sha],
         cwd=workdir, capture_output=True, text=True, timeout=60,
     )
     if result.returncode == 0:
         return workdir
 
-    # base_sha not available locally (shallow clone with --depth 1 during indexing).
-    # Fetch the base branch directly from GitHub, then checkout the exact SHA.
-    if github_url:
+    # target_sha not available locally (shallow clone with --depth 1 during indexing).
+    # Fetch the PR head/base branch directly from GitHub, then checkout the exact SHA.
+    remote_url = fetch_url or github_url
+    if remote_url:
         # Prefer fetching by branch name — more reliable than bare SHA fetch
-        fetch_ref = base_ref if base_ref else base_sha
+        fetch_ref = base_ref if base_ref else target_sha
         subprocess.run(
-            ["git", "fetch", "--depth=50", github_url, fetch_ref],
+            ["git", "fetch", "--depth=50", remote_url, fetch_ref],
             cwd=workdir, capture_output=True, text=True, timeout=300,
         )
         result = subprocess.run(
-            ["git", "checkout", base_sha],
+            ["git", "checkout", target_sha],
             cwd=workdir, capture_output=True, text=True, timeout=60,
         )
         if result.returncode == 0:
@@ -133,7 +136,7 @@ def _checkout_pr_base(
             logger.warning(
                 "Could not checkout exact base SHA %s; using FETCH_HEAD instead. "
                 "Review diff context may be slightly off.",
-                base_sha[:7],
+                target_sha[:7],
             )
             return workdir
 
@@ -145,9 +148,30 @@ def _checkout_pr_base(
     logger.warning(
         "Could not checkout base SHA %s; falling back to HEAD of local clone. "
         "Review diff context may be slightly off.",
-        base_sha[:7],
+        target_sha[:7],
     )
     return workdir
+
+
+def _build_pr_scoped_issue_text(issue_text: str, file_path: str, changed_file) -> str:
+    """Attach the actual per-file PR hunk so the harness reviews PR changes."""
+    pr_patch = getattr(changed_file, "patch", "") or ""
+    if not pr_patch.strip():
+        return issue_text
+
+    additions = getattr(changed_file, "additions", 0)
+    deletions = getattr(changed_file, "deletions", 0)
+    status = getattr(changed_file, "status", "modified")
+    return (
+        f"{issue_text}\n\n"
+        f"[PR diff scope]\n"
+        f"Target file: {file_path}\n"
+        f"File status: {status}; additions: {additions}; deletions: {deletions}\n"
+        f"Review and fix ONLY issues introduced by or directly visible in this file's PR diff.\n"
+        f"Do not patch unrelated pre-existing bugs elsewhere in the file.\n"
+        f"If no actionable bug exists in this diff, do not generate a patch.\n\n"
+        f"```diff\n{pr_patch[:6000]}\n```\n"
+    )
 
 
 def _cleanup_workdir(review_id: str):
@@ -432,12 +456,21 @@ async def run_pr_review(
         await emit("status", {"message": f"Found {len(changed_files)} Python files modified"})
 
         # ----------------------------------------------------------------
-        # 2. Check out PR base commit (separate working dir, no ingest!)
+        # 2. Check out PR head commit (separate working dir, no ingest!)
+        # Review must run against the code as changed by the PR, otherwise the
+        # harness can only see the base version and may fix unrelated old bugs.
         # ----------------------------------------------------------------
-        await emit("status", {"message": f"Checking out base commit {pr.base.sha[:7]}..."})
+        await emit("status", {"message": f"Checking out PR head commit {pr.head.sha[:7]}..."})
+        head_repo_url = getattr(getattr(pr.head, "repo", None), "clone_url", None)
         workdir = await loop.run_in_executor(
             None,
-            lambda: _checkout_pr_base(project.id, pr.base.sha, record.id, base_ref=pr.base.ref),
+            lambda: _checkout_pr_base(
+                project.id,
+                pr.head.sha,
+                record.id,
+                base_ref=pr.head.ref,
+                fetch_url=head_repo_url,
+            ),
         )
 
         # ----------------------------------------------------------------
@@ -499,6 +532,9 @@ async def run_pr_review(
                 })
 
                 file_result = FileReviewResult(file_path=file_path)
+                per_file_issue_text = _build_pr_scoped_issue_text(
+                    issue_text, file_path, changed_file
+                )
 
                 # Phase 1: confirm the file (PR tells us which file; we sanity-check)
                 await emit("phase", {"phase": 1, "file": file_path, "status": "running"})
@@ -509,7 +545,7 @@ async def run_pr_review(
                             None,
                             lambda: _lf_ctx.run(
                                 phase1_localize_file,
-                                llm, issue_text, repo_name, workdir, session, project_id,
+                                llm, per_file_issue_text, repo_name, workdir, session, project_id,
                             ),
                         )
                         langfuse_update_current_span(
@@ -583,7 +619,7 @@ async def run_pr_review(
                         None,
                         lambda: _lf_ctx.run(
                             run_file_review,
-                            issue_text, actual_file, graph_context, workdir,
+                            per_file_issue_text, actual_file, graph_context, workdir,
                             project_id, file_result.risk_level, configs.REFLEXION_MAX_RETRIES,
                         ),
                     )

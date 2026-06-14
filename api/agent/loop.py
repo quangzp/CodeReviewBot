@@ -38,7 +38,38 @@ from src_bot.observability.langfuse_ctx import (
 )
 from api.agent.tools import build_tool_registry, TOOL_DESCRIPTIONS
 
-READ_ONLY_TOOLS = {"list_projects", "project_status", "recent_reviews", "explore_project"}
+READ_ONLY_TOOLS = {
+    "list_projects",
+    "project_status",
+    "recent_reviews",
+    "explore_project",
+    "get_review_detail",
+}
+
+_PR_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+", re.IGNORECASE)
+_STATUS_FOLLOWUP_RE = re.compile(
+    r"\b(status|progress|done|finished|complete|completed|result|results|show|see)\b"
+    r"|trạng thái|tien do|tiến độ|xong|xong chưa|kết quả|ket qua|xem",
+    re.IGNORECASE,
+)
+
+
+def _latest_pr_url_from_context(user_message: str, history: list[dict]) -> str:
+    """Find the most recent PR URL from the current message or recent chat history."""
+    text_parts = []
+    for turn in history[-12:]:
+        text_parts.append(str(turn.get("content", "")))
+    text_parts.append(str(user_message or ""))
+    matches = _PR_URL_RE.findall("\n".join(text_parts))
+    return matches[-1] if matches else ""
+
+
+def _is_review_status_followup(user_message: str) -> bool:
+    """True for short follow-ups that should read review status from DB."""
+    text = str(user_message or "").strip()
+    if not text:
+        return False
+    return bool(_STATUS_FOLLOWUP_RE.search(text))
 
 
 # ============================================================================
@@ -282,8 +313,48 @@ async def run_agent_turn(
             return
 
         # IN_SCOPE — proceed to main agent
-        llm = get_llm(role="chat", temperature=0.2)
         tools = build_tool_registry()
+
+        # Deterministic status/result follow-up path. These questions must read
+        # from the review DB; answering from conversation memory goes stale once
+        # the background review completes.
+        if _is_review_status_followup(user_message):
+            pr_url = _latest_pr_url_from_context(user_message, history)
+            tool_name = "get_review_detail" if pr_url else "recent_reviews"
+            if tool_name in tools:
+                tool_args = {"pr_url": pr_url} if pr_url else {}
+                yield {"type": "tool_call", "name": tool_name, "args": tool_args}
+                with langfuse_span(
+                    "chat.tool_call",
+                    metadata={"name": tool_name, "args": _compact_tool_args(tool_args)},
+                ):
+                    try:
+                        result = await tools[tool_name](**tool_args, user_login=user_login)
+                    except Exception as e:
+                        result = {
+                            "summary": f"Tool failed: {type(e).__name__}: {e}",
+                            "render": {"kind": "error", "message": str(e)},
+                        }
+                    render = result.get("render") or {}
+                    langfuse_update_current_span(
+                        metadata={
+                            "render_kind": render.get("kind", ""),
+                            "status": render.get("status", ""),
+                        },
+                        output={"summary": result.get("summary", "")[:1000]},
+                    )
+
+                yield {
+                    "type": "tool_result",
+                    "name": tool_name,
+                    "summary": result.get("summary", ""),
+                    "render": result.get("render"),
+                }
+                yield {"type": "message", "text": result.get("summary", "")}
+                yield {"type": "done"}
+                return
+
+        llm = get_llm(role="chat", temperature=0.2)
 
         # Build the conversation
         system = SYSTEM_PROMPT.format(tool_catalog=_format_tool_catalog())

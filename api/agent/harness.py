@@ -49,6 +49,7 @@ import concurrent.futures
 import contextvars
 import logging
 import operator
+import re
 from dataclasses import dataclass, field
 from functools import wraps
 from pathlib import Path
@@ -84,6 +85,91 @@ def _compact_for_prompt(items: list, max_n: int, max_chars: int, label: str = ""
     if len(items) > max_n:
         result = f"  ... (showing last {max_n} of {len(items)}) ...\n" + result
     return result or "  (none)"
+
+
+def _extract_scoped_pr_lines(issue_text: str) -> set[int]:
+    """Return new-file line numbers touched by the per-file PR diff scope."""
+    marker = "[PR diff scope]"
+    if marker not in issue_text:
+        return set()
+
+    scoped_text = issue_text[issue_text.find(marker):]
+    in_diff = False
+    current_new: int | None = None
+    lines: set[int] = set()
+
+    for raw in scoped_text.splitlines():
+        if raw.strip() == "```diff":
+            in_diff = True
+            continue
+        if in_diff and raw.strip() == "```":
+            break
+        if not in_diff:
+            continue
+
+        match = re.match(r"@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@", raw)
+        if match:
+            current_new = int(match.group(1))
+            continue
+        if current_new is None:
+            continue
+        if raw.startswith("+") and not raw.startswith("+++"):
+            lines.add(current_new)
+            current_new += 1
+        elif raw.startswith("-") and not raw.startswith("---"):
+            continue
+        else:
+            current_new += 1
+
+    return lines
+
+
+def _extract_patch_touched_lines(patch: str) -> set[int]:
+    """Return line numbers touched by the generated patch."""
+    touched: set[int] = set()
+    old_line: int | None = None
+    new_line: int | None = None
+
+    for raw in patch.splitlines():
+        match = re.match(r"@@\s+-(\d+)(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@", raw)
+        if match:
+            old_line = int(match.group(1))
+            new_line = int(match.group(2))
+            continue
+        if old_line is None or new_line is None:
+            continue
+        if raw.startswith("-") and not raw.startswith("---"):
+            touched.add(old_line)
+            old_line += 1
+        elif raw.startswith("+") and not raw.startswith("+++"):
+            touched.add(new_line)
+            new_line += 1
+        else:
+            old_line += 1
+            new_line += 1
+
+    return touched
+
+
+def _patch_stays_within_pr_scope(issue_text: str, patch: str, tolerance: int = 3) -> tuple[bool, str]:
+    """Reject patches that do not touch the PR diff scope when that scope exists."""
+    pr_lines = _extract_scoped_pr_lines(issue_text)
+    if not pr_lines:
+        return True, ""
+
+    patch_lines = _extract_patch_touched_lines(patch)
+    if not patch_lines:
+        return False, "Patch has no detectable changed lines"
+
+    for line in patch_lines:
+        if any(abs(line - pr_line) <= tolerance for pr_line in pr_lines):
+            return True, ""
+
+    return (
+        False,
+        f"Patch changes lines {min(patch_lines)}-{max(patch_lines)}, "
+        f"outside PR diff scope {min(pr_lines)}-{max(pr_lines)}",
+    )
 
 
 def _safe_len(value: Any) -> int:
@@ -463,6 +549,9 @@ def analyze_fault_node(state: HarnessState) -> dict:
     prompt = (
         f"Analyze this file and identify the specific fault.\n\n"
         f"Issue: {state['issue_text'][:1500]}\n"
+        f"If the issue includes a [PR diff scope] section, treat that diff as "
+        f"the review boundary: identify only faults introduced by or directly "
+        f"visible in that diff, not unrelated pre-existing bugs.\n"
         f"File: {file_path}\n"
         f"Call graph context:\n{state['graph_context'][:800]}\n"
         f"{prior_context}\n"
@@ -760,6 +849,23 @@ def verify_node(state: HarnessState) -> dict:
             "events": [("phase", {
                 "phase": 3, "file": file_path, "attempt": attempt,
                 "status": "apply_failed", "error": apply_error[:100],
+            })],
+        }
+
+    in_scope, scope_reason = _patch_stays_within_pr_scope(state["issue_text"], patch)
+    if not in_scope:
+        reason = f"PR scope check failed: {scope_reason}"
+        return {
+            "applies_cleanly": False,
+            "verification_passed": False,
+            "verification_reason": reason,
+            "eval_score": 0,
+            "failure_reasons": [reason],
+            "completed_steps": ["verify"],
+            "total_steps": state.get("total_steps", 0) + 1,
+            "events": [("phase", {
+                "phase": 3, "file": file_path, "attempt": attempt,
+                "status": "scope_rejected", "error": scope_reason[:120],
             })],
         }
 
@@ -1198,7 +1304,12 @@ def run_file_review(
     _ctx = contextvars.copy_context()
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_ctx.run, _get_graph().invoke, initial)
+            future = executor.submit(
+                _ctx.run,
+                _get_graph().invoke,
+                initial,
+                {"recursion_limit": max(60, _MAX_TOTAL_STEPS * 3)},
+            )
             try:
                 final = future.result(timeout=_GRAPH_TIMEOUT_SECONDS)
             except concurrent.futures.TimeoutError:

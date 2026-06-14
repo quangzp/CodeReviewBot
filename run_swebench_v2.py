@@ -461,6 +461,8 @@ Source code:
 Generate a MINIMAL unified diff to fix this bug. Change ONLY what is necessary.
 Rules:
 - The file path MUST be exactly: {file_path}
+- If the issue contains a [PR diff scope] section, fix ONLY bugs introduced by
+  or directly visible in that PR diff. Do not patch unrelated pre-existing bugs.
 - Include the full diff header (--- a/... +++ b/...)
 - Include correct @@ line numbers
 - Include 3 lines of context around each change
@@ -495,6 +497,8 @@ PHASE3_RETRY_PROMPT = """You are a senior Python developer. Your previous patch 
 Generate a corrected MINIMAL unified diff. Address the specific issues identified in the reflection.
 Rules:
 - The file path MUST be exactly: {file_path}
+- If the issue contains a [PR diff scope] section, fix ONLY bugs introduced by
+  or directly visible in that PR diff. Do not patch unrelated pre-existing bugs.
 - Include the full diff header (--- a/... +++ b/...)
 - Include correct @@ line numbers
 - Include 3 lines of context around each change

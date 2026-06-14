@@ -104,6 +104,26 @@ class TestToolDescriptions:
         assert expected == names
 
 
+class TestReviewStatusFollowups:
+    """Verify ambiguous status follow-ups resolve to fresh review data."""
+
+    def test_status_followup_detected(self):
+        from api.agent.loop import _is_review_status_followup
+        assert _is_review_status_followup("Sorry but I dont see the status")
+
+    def test_latest_pr_url_prefers_current_message_then_recent_history(self):
+        from api.agent.loop import _latest_pr_url_from_context
+        history = [
+            {"role": "user", "content": "https://github.com/millionbillions/chatbot/pull/6"},
+            {"role": "user", "content": "Review https://github.com/millionbillions/chatbot/pull/4"},
+        ]
+        assert _latest_pr_url_from_context("Sorry but I dont see the status", history).endswith("/pull/4")
+        assert _latest_pr_url_from_context(
+            "status https://github.com/millionbillions/chatbot/pull/1",
+            history,
+        ).endswith("/pull/1")
+
+
 class TestCodeVisitorInheritance:
     """Verify the F007 CodeVisitor changes work correctly."""
 

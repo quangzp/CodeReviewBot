@@ -572,10 +572,18 @@ async def chat_endpoint(
         await rename_chat_session(session.id, user_login, new_title)
         session.title = new_title
 
-    # Build history from persisted messages (last 20, text-only)
-    history = []
+    # Build history from persisted messages (last 20).
+    # Merge consecutive same-role messages so the LLM doesn't see back-to-back
+    # assistant entries (tool_result + text from the same turn).
+    history: list[dict] = []
     for m in session.messages[-20:]:
-        history.append({"role": m.role, "content": m.content})
+        content = (m.content or "").strip()
+        if not content:
+            continue
+        if history and history[-1]["role"] == m.role:
+            history[-1]["content"] += "\n" + content
+        else:
+            history.append({"role": m.role, "content": content})
 
     # Persist the new user message
     await append_chat_message(session.id, "user", req.message)

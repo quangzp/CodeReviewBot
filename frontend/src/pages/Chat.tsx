@@ -98,6 +98,7 @@ export default function Chat() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const cancelRef = useRef<(() => void) | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const activeSessionIdRef = useRef<string | null>(null)
   const { user, authEnabled, logout } = useAuth()
 
   // Auto-scroll on new content
@@ -113,6 +114,13 @@ export default function Chat() {
       if (cancelRef.current) cancelRef.current()
     }
   }, [])
+
+  // Keep ref in sync with state so handleSend always reads the latest session_id
+  // even if called before React re-renders (avoids race on first load).
+  const setActiveSession = (id: string | null) => {
+    activeSessionIdRef.current = id
+    setActiveSessionId(id)
+  }
 
   const refreshSessions = async (): Promise<ChatSessionSummary[]> => {
     try {
@@ -132,7 +140,7 @@ export default function Chat() {
       if (list.length === 0) {
         try {
           const created = await api.createSession()
-          setActiveSessionId(created.id)
+          setActiveSession(created.id)
           setItems([WELCOME])
           await refreshSessions()
         } catch (e) {
@@ -141,7 +149,7 @@ export default function Chat() {
       } else {
         // Load most-recently-updated session
         const newest = list[0]
-        setActiveSessionId(newest.id)
+        setActiveSession(newest.id)
         try {
           const full = await api.getSession(newest.id)
           const loaded = recordsToItems(full.messages)
@@ -157,7 +165,7 @@ export default function Chat() {
   const handleSelectSession = async (id: string) => {
     if (id === activeSessionId || streaming) return
     setError(null)
-    setActiveSessionId(id)
+    setActiveSession(id)
     setSidebarOpen(false)
     try {
       const full = await api.getSession(id)
@@ -174,7 +182,7 @@ export default function Chat() {
     setError(null)
     try {
       const created = await api.createSession()
-      setActiveSessionId(created.id)
+      setActiveSession(created.id)
       setItems([WELCOME])
       await refreshSessions()
       setSidebarOpen(false)
@@ -204,7 +212,7 @@ export default function Chat() {
           await handleSelectSession(remaining[0].id)
         } else {
           const created = await api.createSession()
-          setActiveSessionId(created.id)
+          setActiveSession(created.id)
           setItems([WELCOME])
           await refreshSessions()
         }
@@ -230,8 +238,14 @@ export default function Chat() {
         if (it.role === 'user') {
           return { role: 'user' as const, content: it.text ?? '' }
         }
-        const textParts = it.parts.filter((p): p is { kind: 'text'; text: string } => p.kind === 'text')
-        return { role: 'assistant' as const, content: textParts.map((p) => p.text).join('') }
+        // Include both text parts and tool_result summaries so the LLM
+        // has full context even when the backend falls back to this history.
+        const contentParts: string[] = []
+        for (const p of it.parts) {
+          if (p.kind === 'text') contentParts.push(p.text)
+          else if (p.kind === 'tool_result' && p.summary) contentParts.push(`[${p.summary}]`)
+        }
+        return { role: 'assistant' as const, content: contentParts.join('\n') || '...' }
       })
 
     const userId = nextId()
@@ -248,7 +262,7 @@ export default function Chat() {
       history,
       (ev) => {
         if (ev.type === 'session') {
-          setActiveSessionId(ev.id)
+          setActiveSession(ev.id)
           refreshSessions()
         } else if (ev.type === 'message') {
           appendToAssistant(assistantId, (parts) => {
@@ -282,7 +296,7 @@ export default function Chat() {
         cancelRef.current = null
         setError(err)
       },
-      activeSessionId ?? undefined,
+      activeSessionIdRef.current ?? undefined,
     )
     cancelRef.current = handle.cancel
   }
